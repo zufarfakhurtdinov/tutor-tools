@@ -9,10 +9,27 @@ Create a self-contained, single-page HTML application that allows a user to uplo
 *   **Single File Delivery:** The entire application's custom code (HTML, CSS, JavaScript) must be contained within a single `index.html` file. Use a hybrid approach: load utility libraries (JSZip, lamejs) via CDN `<script>` tags, and import modern libraries (Transformers.js) as ES modules within the main application script.
 *   **Reliable Script Execution:** Use ES modules for the main application logic. ES modules naturally wait for dependencies and handle execution order correctly. Utility libraries loaded via script tags will be available globally before the module executes.
 *   **Client-Side Only:** No server-side processing or external API calls are allowed. The app must function offline once loaded (assuming the CDN-hosted libraries and models have been cached by the browser).
-*   **Required Tech Stack (Latest Versions):**
-    *   **Audio Transcription:** Use **@huggingface/transformers v3.7.3** (latest) with `Xenova/whisper-small` model for optimal performance. Import via ES module: `import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.3'`
-    *   **Waveform Visualization:** Use **WaveSurfer.js v7.10.1** (latest) with the Regions plugin for split point visualization. Load via UMD: `<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.umd.min.js"></script>`
-    *   **MP3 Encoding:** Use **lamejs v1.2.1** via CDN: `<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.all.min.js"></script>`
+*   **Browser Compatibility:** Target **Google Chrome 140.0.7339.133 or newer only**. The application does not need to support other browsers, older Chrome versions, or cross-browser compatibility. Use modern Chrome-specific features freely.
+*   **Accessibility Scope:** This is a desktop-only application for Chrome. **Explicitly exclude:**
+    *   Keyboard navigation support
+    *   Screen reader compatibility
+    *   Mobile/touch device considerations
+    The application should work exclusively in a desktop Chrome browser environment.
+*   **Required Tech Stack (Latest Versions - All Verified):**
+
+    **All libraries below have been verified for latest stable versions and valid CDN links:**
+
+    | Library | Version | CDN Link | Plugins |
+    |---------|---------|----------|---------|
+    | @huggingface/transformers | v3.7.2 | `https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js` | N/A |
+    | WaveSurfer.js | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js` | Regions Plugin |
+    | Regions Plugin | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js` | N/A |
+    | @breezystack/lamejs | v1.2.7 | `https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js` | N/A |
+    | JSZip | v3.10.1 | `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js` | N/A |
+
+    *   **Audio Transcription:** Use **@huggingface/transformers v3.7.2** (latest stable) with `Xenova/whisper-small` model for optimal performance. Import via official CDN: `import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js'`
+    *   **Waveform Visualization:** Use **WaveSurfer.js v7.10.1** (latest) with the Regions plugin for split point visualization. Import both as ES modules: `import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'` and `import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'`
+    *   **MP3 Encoding:** Use **@breezystack/lamejs v1.2.7** (latest with TypeScript support) via CDN: `<script src="https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js"></script>`
     *   **ZIP Archiving:** Use **JSZip v3.10.1** via CDN: `<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>`
 
 ### **3. User Input**
@@ -22,6 +39,9 @@ Create a self-contained, single-page HTML application that allows a user to uplo
     *   A large, clearly marked drag-and-drop area.
     *   **The drag-and-drop area must also function as a clickable button that opens the system's file browser.**
 *   **Supported Formats:** The application should reliably handle standard web audio formats like WAV, MP3, OGG, and FLAC.
+*   **File Size Limit:** Maximum audio file size is **100MB**. Files exceeding this limit should be rejected with a clear error message.
+*   **Duration Limit:** Maximum audio duration is **90 minutes**. Longer files should be rejected.
+*   **Memory Management:** Files are processed in 60-second chunks to manage memory usage efficiently.
 
 ### **4. Application Output**
 
@@ -33,6 +53,14 @@ Create a self-contained, single-page HTML application that allows a user to uplo
     *   A primary "Download All as ZIP" button that downloads a single archive named `split_audio.zip`.
 
 ### **5. UI and User Experience (UX) Flow**
+
+**Progress Indicators Required:**
+The application must provide detailed progress feedback for all long-running operations:
+*   **Model downloading/initialization** - Show download progress percentage and current operation (e.g., "Downloading model... 45%", "Initializing WebGPU...")
+*   **Audio processing** - Display chunked processing progress for large files (e.g., "Processing chunk 8 of 15... 53%")
+*   **Audio encoding (MP3 conversion)** - Display encoding progress per segment (e.g., "Encoding segment 2 of 5... 60%")
+*   **ZIP generation** - Show compression progress (e.g., "Creating ZIP archive... 80%")
+*   **Memory management** - Show memory usage warnings when approaching limits
 
 The application should have four distinct states:
 *   **State 1: Initial (Awaiting File)**
@@ -60,13 +88,24 @@ The application should have four distinct states:
     *   Load this URL into WaveSurfer.js to visualize the waveform and retrieve the raw `AudioBuffer`. Store the `AudioBuffer` in a global variable.
 
 *   **Audio Transcription (First Stage):**
-    *   Import and initialize the transcriber: `const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', { device: 'webgpu', dtype: 'q4' })` (use WebGPU acceleration if available, with 4-bit quantization for performance).
-    *   Extract mono audio data from the `AudioBuffer` first channel and convert to the format expected by Transformers.js.
+    *   Configure the environment and initialize the transcriber:
+        ```javascript
+        env.allowRemoteModels = true;
+        env.allowLocalModels = false;
+        const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', { device: 'webgpu', dtype: 'q4' });
+        ```
+    *   **Memory-Efficient Audio Processing:**
+        *   Use Web Audio API resampling: Create AudioContext with 16kHz sample rate for automatic high-quality resampling
+        *   Convert stereo to mono by averaging channels: `(left + right) / 2`
+        *   Process audio in 60-second chunks to manage memory for large files (up to 100MB/90 minutes)
+        *   Clear intermediate buffers immediately after processing each chunk
     *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`.
     *   **CRITICAL - Progressive Transcription:** Use the `progress_callback` parameter to:
         1.  Update the UI progress indicator in real-time
         2.  Append transcription chunks to a global `chunks` array with timestamps
         3.  Display partial transcription text as it becomes available
+        4.  Show chunked processing progress (e.g., "Processing chunk 3 of 12...")
+    *   **Memory Management:** Maximum working memory per chunk: 500MB, Maximum peak memory usage: 4GB
     *   Transition to **State 3** showing the complete waveform and transcription.
 
 *   **Segment Splitting (Second Stage - Triggered by Button Click):**
@@ -79,13 +118,41 @@ The application should have four distinct states:
     *   **Audio Slicing and Encoding:**
         *   Define audio segments by the collected timestamps. The first segment runs from time `0` to the first split point. `1.mp3` will contain audio from `0` to the end-time of "one", `2.mp3` will be from the end-time of "one" to the end-time of "two", and so on.
         *   For each segment, create a new `AudioBuffer` by slicing the original `AudioBuffer` and encode it to MP3 using `lamejs`.
+        *   **Memory-Efficient Encoding:** Process segments one at a time, encoding each segment to MP3 immediately and clearing intermediate buffers to prevent memory buildup.
+        *   **Quality Settings:** Maintain Float32Array precision until final MP3 encoding at 128kbps default bitrate.
     *   **UI Update & Download Generation:**
         *   **Use WaveSurfer.js v7+ Regions Plugin API (Markers are deprecated).** Initialize regions: `const regions = wavesurfer.registerPlugin(Regions.create())`. Clear existing regions: `regions.clear()`. Add split markers as regions: `regions.addRegion({ start: timestamp, end: timestamp + 0.1, color: 'rgba(255,0,0,0.3)' })`.
         *   Create blob URLs for individual MP3 downloads using lamejs encoding.
         *   Use JSZip to bundle all segments: `const zip = new JSZip(); zip.file('1.mp3', mp3Blob1); const zipBlob = await zip.generateAsync({type: 'blob'})`.
+        *   **Progressive ZIP Creation:** Add files to ZIP incrementally with progress updates to prevent UI blocking.
         *   Transition to **State 4** with visible download components.
 
-### **7. Implementation Structure**
+### **7. Error Handling & Edge Cases**
+
+**Required Error Handling:**
+*   **File Validation:**
+    *   Reject files with unsupported sample rates (<8kHz or >192kHz)
+    *   Validate audio codec compatibility before processing
+    *   Check file integrity and handle corrupted audio gracefully
+*   **Memory Management:**
+    *   Monitor browser memory usage and warn when approaching limits
+    *   Provide graceful degradation for low-memory devices
+    *   Implement automatic cleanup on processing failures
+*   **Number Detection Edge Cases:**
+    *   Handle out-of-sequence numbers (e.g., "one, three, two")
+    *   Skip repeated numbers and continue sequence
+    *   Provide fallback message when no sequential numbers are detected
+    *   Handle partial number sequences (e.g., only "one, two" detected)
+*   **Network & Model Loading:**
+    *   Implement retry mechanism for model download failures
+    *   Provide offline fallback message when CDN resources are unavailable
+    *   Handle WebGPU initialization failures with CPU fallback
+*   **Browser Compatibility:**
+    *   Detect and handle missing Web Audio API support
+    *   Gracefully handle quota exceeded errors for large files
+    *   Provide clear error messages for unsupported browser features
+
+### **8. Implementation Structure**
 
 **Recommended HTML Structure:**
 ```html
@@ -98,8 +165,7 @@ The application should have four distinct states:
 
     <!-- Load utility libraries via CDN (available globally) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.all.min.js"></script>
-    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js"></script>
 </head>
 <body>
     <div id="app">
@@ -112,7 +178,8 @@ The application should have four distinct states:
 
     <script type="module">
         // Import modern libraries as ES modules
-        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.3';
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js';
+        import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js';
         import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js';
 
         // Main application logic here
@@ -123,6 +190,10 @@ The application should have four distinct states:
 
         async function initializeApp() {
             try {
+                // Configure environment for remote model loading
+                env.allowRemoteModels = true;
+                env.allowLocalModels = false;
+
                 // Initialize AI model with performance optimizations
                 transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
                     device: 'webgpu', // Use WebGPU if available
@@ -155,7 +226,8 @@ The application should have four distinct states:
 
 **Key Improvements:**
 - **No conflicting script loading approaches** - uses CDN for globals, ES modules for modern libraries
-- **Latest library versions** with specific version numbers for stability
-- **Modern API usage** - Regions instead of deprecated Markers, WebGPU acceleration
-- **Proper error handling** structure for robust initialization
-- **Performance optimizations** - 4-bit quantization, WebGPU acceleration when available
+- **Latest verified library versions** with specific version numbers for stability
+- **Modern API usage** - Regions instead of deprecated Markers, WebGPU acceleration with CPU fallback
+- **Comprehensive error handling** structure for robust initialization and processing
+- **Memory-optimized processing** - chunked processing, progressive cleanup, 4GB memory management
+- **Performance optimizations** - 4-bit quantization, WebGPU acceleration, Web Audio API resampling

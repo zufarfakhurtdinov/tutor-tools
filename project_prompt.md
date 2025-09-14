@@ -6,14 +6,14 @@ Create a self-contained, single-page HTML application that allows a user to uplo
 
 ### **2. Core Technical Requirements**
 
-*   **Single File Delivery:** The entire application's custom code (HTML, CSS, JavaScript) must be contained within a single `index.html` file. Third-party libraries must be included using external `<script>` tags pointing to a reliable CDN. **To guarantee a stable and predictable script execution order and prevent race conditions with the main application module, all third-party library `<script>` tags must include the `defer` attribute.**
-*   **Reliable Script Execution:** To prevent race conditions and ensure that all deferred third-party libraries are fully loaded before the main application logic runs, the entire content of the primary `<script type="module">` **must be wrapped within a `DOMContentLoaded` event listener.** This is a critical step to guarantee that library objects (e.g., `WaveSurfer`, `JSZip`) are defined and available when the application code attempts to use them.
+*   **Single File Delivery:** The entire application's custom code (HTML, CSS, JavaScript) must be contained within a single `index.html` file. Use a hybrid approach: load utility libraries (JSZip, lamejs) via CDN `<script>` tags, and import modern libraries (Transformers.js) as ES modules within the main application script.
+*   **Reliable Script Execution:** Use ES modules for the main application logic. ES modules naturally wait for dependencies and handle execution order correctly. Utility libraries loaded via script tags will be available globally before the module executes.
 *   **Client-Side Only:** No server-side processing or external API calls are allowed. The app must function offline once loaded (assuming the CDN-hosted libraries and models have been cached by the browser).
-*   **Recommended Tech Stack:**
-    *   **Audio Transcription:** Use **Transformers.js** (by Xenova/Hugging Face) to run a state-of-the-art speech recognition model. **`Xenova/whisper-base`** is recommended for a good balance of accuracy and performance.
-    *   **Waveform Visualization:** Use **WaveSurfer.js (v7 or later)**, imported as an ES Module. **Crucially, the Markers Plugin must be explicitly initialized during the `WaveSurfer.create()` call** to ensure its API is available for displaying split points.
-    *   **MP3 Encoding:** Use a JavaScript-based MP3 encoder like `lamejs`.
-    *   **ZIP Archiving:** Use a library like `JSZip` to create the "download all" archive in the browser.
+*   **Required Tech Stack (Latest Versions):**
+    *   **Audio Transcription:** Use **@huggingface/transformers v3.7.3** (latest) with `Xenova/whisper-small` model for optimal performance. Import via ES module: `import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.3'`
+    *   **Waveform Visualization:** Use **WaveSurfer.js v7.10.1** (latest) with the Regions plugin for split point visualization. Load via UMD: `<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.umd.min.js"></script>`
+    *   **MP3 Encoding:** Use **lamejs v1.2.1** via CDN: `<script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.all.min.js"></script>`
+    *   **ZIP Archiving:** Use **JSZip v3.10.1** via CDN: `<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>`
 
 ### **3. User Input**
 
@@ -60,16 +60,14 @@ The application should have four distinct states:
     *   Load this URL into WaveSurfer.js to visualize the waveform and retrieve the raw `AudioBuffer`. Store the `AudioBuffer` in a global variable.
 
 *   **Audio Transcription (First Stage):**
-    *   Using an ES Module script, import the `pipeline` function and initialize the transcriber: `transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base')`.
-    *   Extract the mono audio data from the first channel of the stored `AudioBuffer`.
-    *   **CRITICAL - Accuracy Settings:** To ensure the highest quality and prevent language detection errors, the transcriber pipeline **must** be invoked with specific parameters: `language: 'english'` and `task: 'transcribe'`.
-    *   **CRITICAL - Long Audio & Memory Management:** To reliably handle audio longer than 30 seconds and avoid browser memory issues, the transcriber **must** be called with explicit chunking parameters: `{ chunk_length_s: 30, stride_length_s: 5 }`.
-    *   **CRITICAL - Progressive Transcription:** The pipeline call **must** include a `progress_callback` function. As the callback receives updates for each processed chunk, the application must immediately:
-        1.  Append the new chunk's text to the text display area.
-        2.  Append the new chunk objects to a global `chunks` array.
-        3.  Update the UI with the progress percentage.
-        This ensures the full text is built in real-time and is not lost. The final object returned by the `transcriber` should only be used as a final confirmation.
-    *   Transition the UI to **State 3**, displaying the waveform and the completed transcription.
+    *   Import and initialize the transcriber: `const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', { device: 'webgpu', dtype: 'q4' })` (use WebGPU acceleration if available, with 4-bit quantization for performance).
+    *   Extract mono audio data from the `AudioBuffer` first channel and convert to the format expected by Transformers.js.
+    *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`.
+    *   **CRITICAL - Progressive Transcription:** Use the `progress_callback` parameter to:
+        1.  Update the UI progress indicator in real-time
+        2.  Append transcription chunks to a global `chunks` array with timestamps
+        3.  Display partial transcription text as it becomes available
+    *   Transition to **State 3** showing the complete waveform and transcription.
 
 *   **Segment Splitting (Second Stage - Triggered by Button Click):**
     *   When the user clicks "Find & Split Segments":
@@ -82,6 +80,82 @@ The application should have four distinct states:
         *   Define audio segments by the collected timestamps. The first segment runs from time `0` to the first split point. `1.mp3` will contain audio from `0` to the end-time of "one", `2.mp3` will be from the end-time of "one" to the end-time of "two", and so on.
         *   For each segment, create a new `AudioBuffer` by slicing the original `AudioBuffer` and encode it to MP3 using `lamejs`.
     *   **UI Update & Download Generation:**
-        *   **To ensure correct functionality, use the modern WaveSurfer.js Markers Plugin API.** First, clear any pre-existing markers using **`wavesurfer.markers.clear()`**. Then, for each split point, add a new marker to the instance using **`wavesurfer.markers.add()`**.
-        *   Create blob URLs for individual downloads and use JSZip to prepare the "Download All" archive.
-        *   Transition the UI to **State 4**.
+        *   **Use WaveSurfer.js v7+ Regions Plugin API (Markers are deprecated).** Initialize regions: `const regions = wavesurfer.registerPlugin(Regions.create())`. Clear existing regions: `regions.clear()`. Add split markers as regions: `regions.addRegion({ start: timestamp, end: timestamp + 0.1, color: 'rgba(255,0,0,0.3)' })`.
+        *   Create blob URLs for individual MP3 downloads using lamejs encoding.
+        *   Use JSZip to bundle all segments: `const zip = new JSZip(); zip.file('1.mp3', mp3Blob1); const zipBlob = await zip.generateAsync({type: 'blob'})`.
+        *   Transition to **State 4** with visible download components.
+
+### **7. Implementation Structure**
+
+**Recommended HTML Structure:**
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Transcription & Segmentation Tool</title>
+
+    <!-- Load utility libraries via CDN (available globally) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.all.min.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.umd.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <div id="dropzone">Drop audio file here or click to select</div>
+        <div id="waveform"></div>
+        <div id="transcript"></div>
+        <div id="controls"></div>
+        <div id="downloads"></div>
+    </div>
+
+    <script type="module">
+        // Import modern libraries as ES modules
+        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.3';
+        import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js';
+
+        // Main application logic here
+        // Global libraries (JSZip, lamejs, WaveSurfer) are available
+        // ES module imports are handled automatically
+
+        let transcriber, wavesurfer, regions;
+
+        async function initializeApp() {
+            try {
+                // Initialize AI model with performance optimizations
+                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
+                    device: 'webgpu', // Use WebGPU if available
+                    dtype: 'q4'       // 4-bit quantization for better performance
+                });
+
+                // Initialize WaveSurfer
+                wavesurfer = WaveSurfer.create({
+                    container: '#waveform',
+                    waveColor: '#4A90E2',
+                    progressColor: '#1976D2'
+                });
+
+                // Initialize Regions plugin
+                regions = wavesurfer.registerPlugin(Regions.create());
+
+                console.log('Application initialized successfully');
+            } catch (error) {
+                console.error('Failed to initialize:', error);
+                // Handle initialization errors gracefully
+            }
+        }
+
+        // Start initialization
+        initializeApp();
+    </script>
+</body>
+</html>
+```
+
+**Key Improvements:**
+- **No conflicting script loading approaches** - uses CDN for globals, ES modules for modern libraries
+- **Latest library versions** with specific version numbers for stability
+- **Modern API usage** - Regions instead of deprecated Markers, WebGPU acceleration
+- **Proper error handling** structure for robust initialization
+- **Performance optimizations** - 4-bit quantization, WebGPU acceleration when available

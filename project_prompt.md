@@ -39,14 +39,19 @@ Create a self-contained, single-page HTML application that allows a user to uplo
     *   A large, clearly marked drag-and-drop area.
     *   **The drag-and-drop area must also function as a clickable button that opens the system's file browser.**
 *   **Supported Formats:** The application should reliably handle standard web audio formats like WAV, MP3, OGG, and FLAC.
-*   **File Size Limit:** Maximum audio file size is **100MB**. Files exceeding this limit should be rejected with a clear error message.
-*   **Duration Limit:** Maximum audio duration is **90 minutes**. Longer files should be rejected.
-*   **Memory Management:** Files are processed in 60-second chunks to manage memory usage efficiently.
+*   **File Size Limit:** Maximum audio file size is **80MB**. Files exceeding this limit should be rejected with a clear error message.
+*   **Duration Limit:** Maximum audio duration is **60 minutes**. Longer files should be rejected.
+*   **Memory Management:** All files are processed in 30-second chunks to manage memory usage efficiently.
 
 ### **4. Application Output**
 
 *   **Primary Output:** A collection of audio segments.
-*   **Output Format:** All generated audio segments should be encoded as MP3 files (defaulting to 128kbps bitrate).
+*   **Output Format:** All generated audio segments should be encoded as MP3 files preserving original audio characteristics.
+*   **Audio Quality Preservation:**
+    *   **Maintain original sample rate** (e.g., 44.1kHz, 48kHz, etc.)
+    *   **Maintain original bit depth equivalent** through appropriate MP3 bitrate selection
+    *   **Preserve original channel configuration** (mono, stereo, etc.)
+    *   **Dynamic bitrate selection:** For lossy source formats (MP3, AAC, OGG), use original bitrate (capped at 320kbps maximum). For lossless sources (WAV, FLAC), use 128kbps bitrate.
 *   **File Naming:** Segments should be sequentially named based on the detected number: `1.mp3`, `2.mp3`, `3.mp3`, etc.
 *   **Download Options:**
     *   A list of the generated segments, with an individual download button next to each one.
@@ -57,7 +62,7 @@ Create a self-contained, single-page HTML application that allows a user to uplo
 **Progress Indicators Required:**
 The application must provide detailed progress feedback for all long-running operations:
 *   **Model downloading/initialization** - Show download progress percentage and current operation (e.g., "Downloading model... 45%", "Initializing WebGPU...")
-*   **Audio processing** - Display chunked processing progress for large files (e.g., "Processing chunk 8 of 15... 53%")
+*   **Audio processing** - Display chunked processing progress for all files (e.g., "Processing chunk 8 of 15... 53%") using 30-second chunks
 *   **Audio encoding (MP3 conversion)** - Display encoding progress per segment (e.g., "Encoding segment 2 of 5... 60%")
 *   **ZIP generation** - Show compression progress (e.g., "Creating ZIP archive... 80%")
 *   **Memory management** - Show memory usage warnings when approaching limits
@@ -83,9 +88,11 @@ The application should have four distinct states:
 
 ### **6. Core Algorithm (Detailed Steps)**
 
-*   **File Load & Audio Decoding:**
+*   **File Load & Dual Audio Processing:**
     *   On file drop/select, use `URL.createObjectURL()` to create a local URL for the file.
-    *   Load this URL into WaveSurfer.js to visualize the waveform and retrieve the raw `AudioBuffer`. Store the `AudioBuffer` in a global variable.
+    *   **Dual Audio Workflow:**
+        *   **Original Audio Buffer:** Load into WaveSurfer.js to visualize waveform and store the raw `AudioBuffer` in its original format (sample rate, channels, bit depth) for final segment splitting.
+        *   **Transcription Audio Buffer:** Create a separate, processed version for AI transcription (16kHz mono) without modifying the original.
 
 *   **Audio Transcription (First Stage):**
     *   Configure the environment and initialize the transcriber:
@@ -94,34 +101,65 @@ The application should have four distinct states:
         env.allowLocalModels = false;
         const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', { device: 'webgpu', dtype: 'q4' });
         ```
-    *   **Memory-Efficient Audio Processing:**
-        *   Use Web Audio API resampling: Create AudioContext with 16kHz sample rate for automatic high-quality resampling
-        *   Convert stereo to mono by averaging channels: `(left + right) / 2`
-        *   Process audio in 60-second chunks to manage memory for large files (up to 100MB/90 minutes)
-        *   Clear intermediate buffers immediately after processing each chunk
-    *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`.
+    *   **Memory-Efficient Audio Processing (For Transcription Only):**
+        *   **CRITICAL:** Create transcription-specific audio processing separate from original audio
+        *   Use Web Audio API resampling: Create separate AudioContext with 16kHz sample rate for transcription
+        *   Convert stereo to mono by averaging channels: `(left + right) / 2` (transcription audio only)
+        *   Process all transcription audio in 30-second chunks with streaming approach
+        *   **Preserve Original:** Keep original `AudioBuffer` untouched in its native format for final splitting
+        *   Clear transcription processing buffers immediately after each chunk
+    *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`. Use 30-second chunk streaming processing for all files.
     *   **CRITICAL - Progressive Transcription:** Use the `progress_callback` parameter to:
         1.  Update the UI progress indicator in real-time
         2.  Append transcription chunks to a global `chunks` array with timestamps
         3.  Display partial transcription text as it becomes available
-        4.  Show chunked processing progress (e.g., "Processing chunk 3 of 12...")
-    *   **Memory Management:** Maximum working memory per chunk: 500MB, Maximum peak memory usage: 4GB
+        4.  Show chunked processing progress (e.g., "Processing chunk 3 of 12...") with 30-second streaming chunks
+    *   **Memory Management:** Maximum working memory per chunk: 600MB, Maximum peak memory usage: 1GB
     *   Transition to **State 3** showing the complete waveform and transcription.
 
 *   **Segment Splitting (Second Stage - Triggered by Button Click):**
     *   When the user clicks "Find & Split Segments":
-    *   **Number Identification:** Default to English and initialize an array of number words (`['one', 'two', 'three', ...]`).
+    *   **Number Identification:** Support numbers from 1-99 in both formats:
+        *   **Number Words:** `['one', 'two', 'three', ..., 'twenty', 'twenty-one', ..., 'ninety-nine']`
+        *   **Digits:** `['1', '2', '3', ..., '99']`
+        *   **Mixed Recognition:** The system should detect either format interchangeably (e.g., sequence could be "one", "2", "three", "4")
     *   **Splitting Logic:**
+        *   Create comprehensive number mapping arrays for both words and digits (1-99).
         *   Iterate through the globally stored `chunks` array.
-        *   For each chunk, check if its `text` (trimmed and lowercased) matches the next expected number in the sequence.
+        *   For each chunk, normalize the `text` (trimmed, lowercased, punctuation removed) and check if it matches the next expected number in the sequence (supporting both "twenty-one" and "21" formats).
+        *   **Flexible Matching:** Handle transcription variations (e.g., "twenty one" vs "twenty-one", "1st" vs "one", etc.).
         *   If the correct sequential number is found, store its **end timestamp** as a split point. Increment the number counter.
-    *   **Audio Slicing and Encoding:**
+    *   **Audio Slicing and Encoding (Using Original Audio):**
         *   Define audio segments by the collected timestamps. The first segment runs from time `0` to the first split point. `1.mp3` will contain audio from `0` to the end-time of "one", `2.mp3` will be from the end-time of "one" to the end-time of "two", and so on.
+        *   **CRITICAL:** Use the original `AudioBuffer` (not the transcription-processed version) for all segment creation
         *   For each segment, create a new `AudioBuffer` by slicing the original `AudioBuffer` and encode it to MP3 using `lamejs`.
+        *   **Quality Preservation Settings:**
+            *   **Detect original audio characteristics:** sample rate, channel count, and estimated quality
+            *   **Dynamic MP3 bitrate:** For lossy sources (MP3, AAC, OGG), use original bitrate when available, fallback to file size estimation (capped at 320kbps maximum). For lossless sources (WAV, FLAC), use 128kbps bitrate.
+            *   **Preserve channel configuration:** mono sources → mono MP3, stereo sources → stereo MP3
+            *   **Maintain sample rate:** Use original sample rate for MP3 encoding (don't downsample to 44.1kHz)
         *   **Memory-Efficient Encoding:** Process segments one at a time, encoding each segment to MP3 immediately and clearing intermediate buffers to prevent memory buildup.
-        *   **Quality Settings:** Maintain Float32Array precision until final MP3 encoding at 128kbps default bitrate.
     *   **UI Update & Download Generation:**
-        *   **Use WaveSurfer.js v7+ Regions Plugin API (Markers are deprecated).** Initialize regions: `const regions = wavesurfer.registerPlugin(Regions.create())`. Clear existing regions: `regions.clear()`. Add split markers as regions: `regions.addRegion({ start: timestamp, end: timestamp + 0.1, color: 'rgba(255,0,0,0.3)' })`.
+        *   **Use WaveSurfer.js v7+ Regions Plugin API (Markers are deprecated).** Complete region management workflow:
+            ```javascript
+            // Clear existing regions before adding new ones
+            regions.clearRegions();
+
+            // Add split markers as regions (ONLY after 'ready' event)
+            wavesurfer.on('ready', () => {
+                splitTimestamps.forEach((timestamp, index) => {
+                    regions.addRegion({
+                        start: timestamp,
+                        end: timestamp + 0.1, // 0.1 second marker width
+                        color: 'rgba(255, 0, 0, 0.3)',
+                        drag: false,          // Prevent user dragging
+                        resize: false,        // Prevent user resizing
+                        content: `Split ${index + 1}`, // Optional label
+                        id: `split-${index + 1}`       // Unique identifier
+                    });
+                });
+            });
+            ```
         *   Create blob URLs for individual MP3 downloads using lamejs encoding.
         *   Use JSZip to bundle all segments: `const zip = new JSZip(); zip.file('1.mp3', mp3Blob1); const zipBlob = await zip.generateAsync({type: 'blob'})`.
         *   **Progressive ZIP Creation:** Add files to ZIP incrementally with progress updates to prevent UI blocking.
@@ -129,11 +167,28 @@ The application should have four distinct states:
 
 ### **7. Error Handling & Edge Cases**
 
+**Simple Error Handling Strategy:**
+*   **Console Logging:** All errors must be logged to browser console with descriptive messages
+*   **Visual Error Display:** Create a dedicated HTML element (`<div id="error-display">`) to show user-friendly error messages
+*   **No Dialogs/Alerts:** Avoid `alert()`, `confirm()`, or modal dialogs - use inline HTML elements only
+*   **Error Message Format:**
+    ```javascript
+    function showError(message) {
+        console.error('Audio App Error:', message);
+        const errorDiv = document.getElementById('error-display');
+        errorDiv.innerHTML = `<div class="error-message">${message}</div>`;
+        errorDiv.style.display = 'block';
+    }
+    ```
+*   **Error Recovery:** Provide clear instructions in error messages on how user can proceed or retry
+
 **Required Error Handling:**
 *   **File Validation:**
     *   Reject files with unsupported sample rates (<8kHz or >192kHz)
     *   Validate audio codec compatibility before processing
     *   Check file integrity and handle corrupted audio gracefully
+    *   **Audio Quality Detection:** Automatically detect original sample rate, bit depth, and channel configuration for preservation
+    *   **Bitrate Estimation:** For lossy sources (MP3, AAC, OGG), extract original audio bitrate from file metadata when available, fallback to file size/duration calculation for MP3 encoding bitrate. For lossless sources (WAV, FLAC), use 128kbps for MP3 encoding.
 *   **Memory Management:**
     *   Monitor browser memory usage and warn when approaching limits
     *   Provide graceful degradation for low-memory devices
@@ -141,8 +196,12 @@ The application should have four distinct states:
 *   **Number Detection Edge Cases:**
     *   Handle out-of-sequence numbers (e.g., "one, three, two")
     *   Skip repeated numbers and continue sequence
-    *   Provide fallback message when no sequential numbers are detected
-    *   Handle partial number sequences (e.g., only "one, two" detected)
+    *   Support mixed formats within same sequence (e.g., "one, 2, three, 4, five")
+    *   Handle ordinal numbers (e.g., "1st", "2nd", "first", "second")
+    *   Normalize compound numbers (e.g., "twenty one" → "twenty-one" → "21")
+    *   Handle transcription errors (e.g., "to" instead of "two", "for" instead of "four")
+    *   Provide fallback message when no sequential numbers are detected (minimum 2 consecutive numbers required)
+    *   Handle partial number sequences up to 99 (e.g., sequence from "one" to "fifty-seven")
 *   **Network & Model Loading:**
     *   Implement retry mechanism for model download failures
     *   Provide offline fallback message when CDN resources are unavailable
@@ -150,7 +209,13 @@ The application should have four distinct states:
 *   **Browser Compatibility:**
     *   Detect and handle missing Web Audio API support
     *   Gracefully handle quota exceeded errors for large files
+    *   Handle WebGPU unavailability with automatic CPU fallback
     *   Provide clear error messages for unsupported browser features
+    *   **WaveSurfer Region Management:**
+        *   Always call `regions.clearRegions()` before adding new regions
+        *   Only call `regions.addRegion()` after 'ready' event is fired
+        *   Use proper cleanup with `regions.destroy()` when switching files
+        *   Handle cases where regions plugin fails to initialize
 
 ### **8. Implementation Structure**
 
@@ -169,6 +234,7 @@ The application should have four distinct states:
 </head>
 <body>
     <div id="app">
+        <div id="error-display" style="display: none;"></div>
         <div id="dropzone">Drop audio file here or click to select</div>
         <div id="waveform"></div>
         <div id="transcript"></div>
@@ -188,32 +254,63 @@ The application should have four distinct states:
 
         let transcriber, wavesurfer, regions;
 
+        // Simple error handling function
+        function showError(message) {
+            console.error('Audio App Error:', message);
+            const errorDiv = document.getElementById('error-display');
+            errorDiv.innerHTML = `<div class="error-message">${message}</div>`;
+            errorDiv.style.display = 'block';
+        }
+
         async function initializeApp() {
             try {
                 // Configure environment for remote model loading
                 env.allowRemoteModels = true;
                 env.allowLocalModels = false;
 
-                // Initialize AI model with performance optimizations
+                // Initialize AI model with WebGPU fallback to CPU
+                let device = 'webgpu';
+                try {
+                    // Test WebGPU availability
+                    if (!navigator.gpu) device = 'cpu';
+                } catch {
+                    device = 'cpu';
+                }
+
                 transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
-                    device: 'webgpu', // Use WebGPU if available
-                    dtype: 'q4'       // 4-bit quantization for better performance
+                    device: device,
+                    dtype: device === 'webgpu' ? 'q4' : 'fp32'
                 });
 
-                // Initialize WaveSurfer
+                // Initialize WaveSurfer with complete configuration
                 wavesurfer = WaveSurfer.create({
                     container: '#waveform',
                     waveColor: '#4A90E2',
-                    progressColor: '#1976D2'
+                    progressColor: '#1976D2',
+                    interact: true,
+                    dragToSeek: true,
+                    height: 100
                 });
 
-                // Initialize Regions plugin
-                regions = wavesurfer.registerPlugin(Regions.create());
+                // Initialize Regions plugin with proper registration
+                regions = wavesurfer.registerPlugin(Regions.create({
+                    dragSelection: false // Prevent accidental region creation
+                }));
+
+                // Setup event handlers for proper region management
+                wavesurfer.on('ready', () => {
+                    console.log('WaveSurfer ready - can now add regions safely');
+                });
+
+                wavesurfer.on('destroy', () => {
+                    if (regions) {
+                        regions.destroy();
+                    }
+                });
 
                 console.log('Application initialized successfully');
             } catch (error) {
-                console.error('Failed to initialize:', error);
-                // Handle initialization errors gracefully
+                showError('Failed to initialize application. Please refresh the page and try again.');
             }
         }
 
@@ -229,5 +326,5 @@ The application should have four distinct states:
 - **Latest verified library versions** with specific version numbers for stability
 - **Modern API usage** - Regions instead of deprecated Markers, WebGPU acceleration with CPU fallback
 - **Comprehensive error handling** structure for robust initialization and processing
-- **Memory-optimized processing** - chunked processing, progressive cleanup, 4GB memory management
+- **Memory-optimized processing** - chunked processing, progressive cleanup, 1GB memory management
 - **Performance optimizations** - 4-bit quantization, WebGPU acceleration, Web Audio API resampling

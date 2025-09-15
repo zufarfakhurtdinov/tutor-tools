@@ -187,6 +187,34 @@ The application should have four distinct states:
         *   Process transcription audio in 30-second chunks with streaming approach
         *   **Memory Management:** Original buffer remains in WaveSurfer, transcription buffers are cleared after each chunk
         *   **Timestamp Synchronization:** Account for sample rate differences when mapping word timestamps back to original audio
+    *   **CRITICAL - Audio Data Format Conversion:** Before passing audio data to the transcriber, the AudioBuffer MUST be converted to Float32Array format. The Hugging Face Transformers.js library expects Float32Array input, not AudioBuffer objects. Failure to convert will result in "e.subarray is not a function" errors.
+        ```javascript
+        // Convert AudioBuffer to Float32Array for transcription
+        function audioBufferToFloat32Array(audioBuffer) {
+            // For mono audio, extract the first channel
+            if (audioBuffer.numberOfChannels === 1) {
+                return audioBuffer.getChannelData(0);
+            }
+
+            // For stereo/multi-channel, average all channels to mono
+            const firstChannel = audioBuffer.getChannelData(0);
+            const audioData = new Float32Array(firstChannel.length);
+
+            for (let i = 0; i < firstChannel.length; i++) {
+                let sum = 0;
+                for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+                    sum += audioBuffer.getChannelData(channel)[i];
+                }
+                audioData[i] = sum / audioBuffer.numberOfChannels;
+            }
+
+            return audioData;
+        }
+
+        // Usage before transcription
+        const audioData = audioBufferToFloat32Array(chunkBuffer);
+        const result = await transcriber(audioData, transcriptionOptions);
+        ```
     *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`, `return_timestamps: 'word'`. Use 30-second chunk streaming processing for all files.
     *   **CRITICAL - Word-Level Timestamp Handling:** The transcription process must be configured to return detailed timestamp data for each transcribed word. The `return_timestamps: 'word'` parameter must guarantee that the output includes a word-level data array containing objects with individual word text and timestamp ([start, end]) pairs.
     *   **CRITICAL - Progressive Transcription:** Use the `progress_callback` parameter to:
@@ -271,6 +299,10 @@ The application should have four distinct states:
 *   **Error Recovery:** Provide clear instructions in error messages on how user can proceed or retry
 
 **Required Error Handling:**
+*   **Audio Data Format Errors:**
+    *   **CRITICAL:** Handle "e.subarray is not a function" error by ensuring all audio data passed to the transcriber is converted to Float32Array format
+    *   Implement defensive checks to verify audio data type before transcription: `if (!(audioData instanceof Float32Array)) { throw new Error('Audio data must be Float32Array for transcription'); }`
+    *   Provide clear error message if AudioBuffer is passed directly to transcriber without conversion
 *   **File Validation:**
     *   Reject files with unsupported sample rates (<8kHz or >192kHz)
     *   Validate audio codec compatibility before processing

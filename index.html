@@ -752,8 +752,16 @@
                     // Extract chunk
                     const chunkBuffer = extractAudioChunk(transcriptionBuffer, startTime, endTime);
 
+                    // Convert AudioBuffer to Float32Array for transcription
+                    const audioData = audioBufferToFloat32Array(chunkBuffer);
+
+                    // Defensive check to ensure correct data format
+                    if (!(audioData instanceof Float32Array)) {
+                        throw new Error('Audio data must be Float32Array for transcription');
+                    }
+
                     // Transcribe chunk
-                    const result = await transcriber(chunkBuffer, {
+                    const result = await transcriber(audioData, {
                         language: 'english',
                         task: 'transcribe',
                         return_timestamps: 'word',
@@ -797,6 +805,12 @@
 
             } catch (error) {
                 console.error('Transcription error:', error);
+
+                // Handle specific audio format error
+                if (error.message && error.message.includes('subarray is not a function')) {
+                    throw new Error('Audio format error: Failed to convert audio data for transcription. This may be due to an incompatible audio format.');
+                }
+
                 throw new Error(`Transcription failed: ${error.message}`);
             }
         }
@@ -862,6 +876,28 @@
             }
 
             return monoBuffer;
+        }
+
+        // Convert AudioBuffer to Float32Array for transcription
+        function audioBufferToFloat32Array(audioBuffer) {
+            // For mono audio, extract the first channel
+            if (audioBuffer.numberOfChannels === 1) {
+                return audioBuffer.getChannelData(0);
+            }
+
+            // For stereo/multi-channel, average all channels to mono
+            const firstChannel = audioBuffer.getChannelData(0);
+            const audioData = new Float32Array(firstChannel.length);
+
+            for (let i = 0; i < firstChannel.length; i++) {
+                let sum = 0;
+                for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+                    sum += audioBuffer.getChannelData(channel)[i];
+                }
+                audioData[i] = sum / audioBuffer.numberOfChannels;
+            }
+
+            return audioData;
         }
 
         function extractAudioChunk(buffer, startTime, endTime) {

@@ -19,6 +19,8 @@ Create a self-contained, single-page HTML application that allows a user to uplo
 
     **All libraries below have been verified for latest stable versions and valid CDN links:**
 
+    **✅ VERIFIED: @huggingface/transformers v3.7.2 supports `return_timestamps: 'word'` parameter for word-level timestamp extraction. This functionality was introduced in v2.4.0 and continues to work in v3.7.2.**
+
     | Library | Version | CDN Link | Plugins |
     |---------|---------|----------|---------|
     | @huggingface/transformers | v3.7.2 | `https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js` | N/A |
@@ -150,9 +152,16 @@ The application should have four distinct states:
 
 *   **File Load & Dual Audio Processing:**
     *   On file drop/select, use `URL.createObjectURL()` to create a local URL for the file.
-    *   **Dual Audio Workflow:**
-        *   **Original Audio Buffer:** Load into WaveSurfer.js to visualize waveform and store the raw `AudioBuffer` in its original format (sample rate, channels, bit depth) for final segment splitting.
-        *   **Transcription Audio Buffer:** Create a separate, processed version for AI transcription (16kHz mono) without modifying the original.
+    *   **Dual Audio Workflow (Specific Implementation Order):**
+        *   **Step 1 - WaveSurfer Loading:** Load the file into WaveSurfer.js first for waveform visualization:
+            ```javascript
+            await wavesurfer.load(fileUrl);
+            ```
+        *   **Step 2 - Extract Original Buffer:** After WaveSurfer loading completes, extract the AudioBuffer using the v7 API:
+            ```javascript
+            const originalBuffer = wavesurfer.getDecodedData(); // Preserves original format
+            ```
+        *   **Step 3 - Create Transcription Buffer:** Generate a separate 16kHz mono version from the extracted original buffer for AI transcription processing, without modifying the original buffer.
 
 *   **Audio Transcription (First Stage):**
     *   Configure the environment and initialize the transcriber:
@@ -163,12 +172,21 @@ The application should have four distinct states:
         const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', { device: 'webgpu', dtype: 'q4' });
         ```
     *   **Memory-Efficient Audio Processing (For Transcription Only):**
-        *   **CRITICAL:** Create transcription-specific audio processing separate from original audio
-        *   Use Web Audio API resampling: Create separate AudioContext with 16kHz sample rate for transcription
-        *   Convert stereo to mono by averaging channels: `(left + right) / 2` (transcription audio only)
-        *   Process all transcription audio in 30-second chunks with streaming approach
-        *   **Preserve Original:** Keep original `AudioBuffer` untouched in its native format for final splitting
-        *   Clear transcription processing buffers immediately after each chunk
+        *   **CRITICAL:** Process transcription audio from the extracted `originalBuffer` obtained via `wavesurfer.getDecodedData()`
+        *   **Implementation Strategy:**
+            ```javascript
+            // Create transcription-specific AudioContext
+            const transcriptionContext = new AudioContext({sampleRate: 16000});
+
+            // Resample original buffer to 16kHz for transcription
+            const transcriptionBuffer = await resampleBuffer(originalBuffer, 16000);
+
+            // Convert to mono if needed: (left + right) / 2
+            const monoBuffer = convertToMono(transcriptionBuffer);
+            ```
+        *   Process transcription audio in 30-second chunks with streaming approach
+        *   **Memory Management:** Original buffer remains in WaveSurfer, transcription buffers are cleared after each chunk
+        *   **Timestamp Synchronization:** Account for sample rate differences when mapping word timestamps back to original audio
     *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`, `return_timestamps: 'word'`. Use 30-second chunk streaming processing for all files.
     *   **CRITICAL - Word-Level Timestamp Handling:** The transcription process must be configured to return detailed timestamp data for each transcribed word. The `return_timestamps: 'word'` parameter must guarantee that the output includes a word-level data array containing objects with individual word text and timestamp ([start, end]) pairs.
     *   **CRITICAL - Progressive Transcription:** Use the `progress_callback` parameter to:
@@ -177,6 +195,7 @@ The application should have four distinct states:
         3.  Display partial transcription text as it becomes available
         4.  Show chunked processing progress (e.g., "Processing chunk 3 of 12...") with 30-second streaming chunks
     *   **Memory Management:** Maximum working memory per chunk: 600MB, Maximum peak memory usage: 1GB
+        *   **Note:** Original buffer remains in WaveSurfer's memory (~200-400MB for 80MB file), transcription processing uses additional ~200-400MB per chunk, cleared after processing
     *   Transition to **State 3** showing the complete waveform and transcription.
 
 *   **Segment Splitting (Second Stage - Triggered by Button Click):**
@@ -194,8 +213,14 @@ The application should have four distinct states:
         *   If the correct sequential number is found, store its **end timestamp** as a split point. Increment the number counter.
     *   **Audio Slicing and Encoding (Using Original Audio):**
         *   Define audio segments by the collected timestamps. The first segment runs from time `0` to the first split point. `1.mp3` will contain audio from `0` to the end-time of "one", `2.mp3` will be from the end-time of "one" to the end-time of "two", and so on.
-        *   **CRITICAL:** Use the original `AudioBuffer` (not the transcription-processed version) for all segment creation
-        *   For each segment, create a new `AudioBuffer` by slicing the original `AudioBuffer` and encode it to MP3 using `lamejs`.
+        *   **CRITICAL:** Use the original `AudioBuffer` extracted from WaveSurfer via `wavesurfer.getDecodedData()` for all segment creation
+        *   **Timestamp Mapping:** Convert word timestamps from 16kHz transcription back to original sample rate before slicing:
+            ```javascript
+            const originalSampleRate = originalBuffer.sampleRate;
+            const scaleFactor = originalSampleRate / 16000;
+            const adjustedTimestamp = transcriptionTimestamp * scaleFactor;
+            ```
+        *   For each segment, create a new `AudioBuffer` by slicing the original `AudioBuffer` at the adjusted timestamps and encode it to MP3 using `lamejs`.
         *   **Quality Preservation Settings:**
             *   **Detect original audio characteristics:** sample rate, channel count, and estimated quality
             *   **Dynamic MP3 bitrate:** For lossy sources (MP3, AAC, OGG), use original bitrate when available, fallback to file size estimation (capped at 320kbps maximum). For lossless sources (WAV, FLAC), use 128kbps bitrate.

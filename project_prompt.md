@@ -27,10 +27,69 @@ Create a self-contained, single-page HTML application that allows a user to uplo
     | @breezystack/lamejs | v1.2.7 | `https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js` | N/A |
     | JSZip | v3.10.1 | `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js` | N/A |
 
-    *   **Audio Transcription:** Use **@huggingface/transformers v3.7.2** (latest stable) with `Xenova/whisper-small` model for optimal performance. Import via official CDN: `import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js'`
+    *   **Audio Transcription:** Use **@huggingface/transformers v3.7.2** (latest stable) with `Xenova/whisper-tiny` model for maximum client-side performance and reduced initial load time. Import via official CDN: `import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js'`
     *   **Waveform Visualization:** Use **WaveSurfer.js v7.10.1** (latest) with the Regions plugin for split point visualization. Import both as ES modules: `import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'` and `import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'`
     *   **MP3 Encoding:** Use **@breezystack/lamejs v1.2.7** (latest with TypeScript support) via CDN: `<script src="https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js"></script>`
     *   **ZIP Archiving:** Use **JSZip v3.10.1** via CDN: `<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>`
+
+### **2.1. Interactive Transcript Requirements (Bidirectional Audio-Text Alignment)**
+
+**UI State Integration:** These requirements apply to **State 3** (Transcription Results) and **State 4** (Segmented Results) as described in Section 5.
+
+**Progressive Activation Timeline:**
+*   **State 1-2:** Interactive features are **disabled** - transcript is not yet available
+*   **State 3:** **All interactive features activate** immediately when transcription completes:
+    *   Click-to-seek functionality (FR3)
+    *   Real-time playback highlighting (FR4)
+    *   Auto-scroll during playback (FR5)
+*   **State 4:** **All features continue functioning** while split markers and downloads are added
+
+Interactive features become available only after transcription completion.
+
+**UI Coordination:** The interactive transcript works alongside existing playback controls (Play/Stop buttons from State 3). Both transcript clicks and button clicks control the same underlying WaveSurfer audio player instance.
+
+**Core Problem Analysis:**
+The application must establish a bidirectional relationship between the audio player and text display:
+*   **From Text to Audio:** User controls audio playback by interacting with the text
+*   **From Audio to Text:** Visual feedback in text reflects current audio playback state
+
+**Functional Requirements:**
+
+**FR1: High-Granularity Timestamp Acquisition**
+*   The system must request the highest possible temporal resolution from the transcription model
+*   Required output: data structure containing each transcribed word mapped to precise start and end timestamps
+*   **CRITICAL:** Use `return_timestamps: 'word'` parameter for word-level timestamp granularity
+*   Chunk-level or sentence-level timestamps are insufficient for this feature
+
+**FR2: Interactive Transcript User Interface**
+*   Transcript display must allow individual word interactivity
+*   Standard `<textarea>` elements are not suitable - must use `<div>` with dynamic content
+*   Each word must be individually addressable for both visual styling and user input events
+*   Implementation: Create `populateTranscript(wordTimestamps)` function that generates `<span>` elements for each word
+*   Each `<span>` must store corresponding start/end times in `data-*` attributes (e.g., `data-start-time="1.23"`, `data-end-time="1.45"`)
+
+**FR3: Click-to-Seek Functionality**
+*   When user clicks any word in transcript display, audio player must immediately seek to start time of that word
+*   Audio playback should commence automatically from the new position
+*   Implementation: Single click event listener on parent transcript `<div>` using event delegation pattern
+
+**FR4: Real-time Playback Highlighting**
+*   While audio is playing, the word currently being spoken must be visually highlighted in transcript
+*   Highlight must move word-to-word in real-time, synchronized with audio playback
+*   When audio playback is paused, stopped, or finished, highlighting must be removed
+*   Implementation: WaveSurfer `timeupdate` event listener with efficient span finding logic
+
+**FR5: User Experience Enhancement (Auto-Scroll)**
+*   For transcripts exceeding visible container area, view must automatically scroll to keep currently highlighted word visible
+*   Implementation: `scrollIntoView({ behavior: 'smooth', block: 'center' })` on highlighted elements
+
+**Implementation Requirements:**
+*   Use `return_timestamps: 'word'` to get individual word timestamps
+*   Replace standard `<textarea>` with `<div>` containing `<span>` elements for each word
+*   Store word timing data in `data-*` attributes on each `<span>` element
+*   Implement click-to-seek using event delegation pattern on parent container
+*   Add real-time highlighting synchronized with audio playback using WaveSurfer's `timeupdate` event
+*   Include auto-scroll functionality to keep highlighted words visible
 
 ### **3. User Input**
 
@@ -78,11 +137,12 @@ The application should have four distinct states:
     *   This state is shown immediately after transcription is complete.
     *   **Waveform Player:** A visual waveform of the full audio.
     *   **Playback Controls:** Explicit **"Play" and "Stop" buttons** that control audio playback of the waveform. The "Play" button should toggle to a "Pause" state during playback.
-    *   **Transcription Display:** A scrollable text area showing the full transcription.
+    *   **Interactive Transcript Display:** An interactive transcript implementing all requirements from Section 2.1, where each word can be clicked to seek audio playback, with real-time highlighting during playback.
     *   **Action Button:** A prominent button labeled **"Find & Split Segments"**. The download components are hidden at this stage.
 *   **State 4: Segmented Results (Splitting Complete)**
     *   This state is shown after the user clicks the "Find & Split Segments" button.
     *   The UI from State 3 remains, but is now enhanced with:
+    *   **Interactive Transcript:** All Section 2.1 features continue to function (click-to-seek, real-time highlighting, auto-scroll)
     *   **Split Markers:** Vertical lines on the waveform at each calculated split point.
     *   **Download Component:** A list of downloadable segments and a "Download All as ZIP" button now become visible.
 
@@ -99,7 +159,8 @@ The application should have four distinct states:
         ```javascript
         env.allowRemoteModels = true;
         env.allowLocalModels = false;
-        const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', { device: 'webgpu', dtype: 'q4' });
+        console.log('Initializing transcription model: Xenova/whisper-tiny');
+        const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', { device: 'webgpu', dtype: 'q4' });
         ```
     *   **Memory-Efficient Audio Processing (For Transcription Only):**
         *   **CRITICAL:** Create transcription-specific audio processing separate from original audio
@@ -108,16 +169,18 @@ The application should have four distinct states:
         *   Process all transcription audio in 30-second chunks with streaming approach
         *   **Preserve Original:** Keep original `AudioBuffer` untouched in its native format for final splitting
         *   Clear transcription processing buffers immediately after each chunk
-    *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`. Use 30-second chunk streaming processing for all files.
+    *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`, `return_timestamps: 'word'`. Use 30-second chunk streaming processing for all files.
+    *   **CRITICAL - Word-Level Timestamp Handling:** The transcription process must be configured to return detailed timestamp data for each transcribed word. The `return_timestamps: 'word'` parameter must guarantee that the output includes a word-level data array containing objects with individual word text and timestamp ([start, end]) pairs.
     *   **CRITICAL - Progressive Transcription:** Use the `progress_callback` parameter to:
         1.  Update the UI progress indicator in real-time
-        2.  Append transcription chunks to a global `chunks` array with timestamps
+        2.  Append word-level transcription data to a global `wordTimestamps` array
         3.  Display partial transcription text as it becomes available
         4.  Show chunked processing progress (e.g., "Processing chunk 3 of 12...") with 30-second streaming chunks
     *   **Memory Management:** Maximum working memory per chunk: 600MB, Maximum peak memory usage: 1GB
     *   Transition to **State 3** showing the complete waveform and transcription.
 
 *   **Segment Splitting (Second Stage - Triggered by Button Click):**
+    *   **CRITICAL - Robust Splitting Logic:** Before attempting to find and split segments, the code must validate that the `wordTimestamps` variable is a non-empty array. If the model fails to return this word-level data (resulting in undefined or an empty array), the application must not crash. Instead, it should disable the "Find & Split Segments" button and display a clear, user-friendly error message explaining that the necessary word-level timestamp data could not be generated, and that splitting is therefore not possible.
     *   When the user clicks "Find & Split Segments":
     *   **Number Identification:** Support numbers from 1-99 in both formats:
         *   **Number Words:** `['one', 'two', 'three', ..., 'twenty', 'twenty-one', ..., 'ninety-nine']`
@@ -125,8 +188,8 @@ The application should have four distinct states:
         *   **Mixed Recognition:** The system should detect either format interchangeably (e.g., sequence could be "one", "2", "three", "4")
     *   **Splitting Logic:**
         *   Create comprehensive number mapping arrays for both words and digits (1-99).
-        *   Iterate through the globally stored `chunks` array.
-        *   For each chunk, normalize the `text` (trimmed, lowercased, punctuation removed) and check if it matches the next expected number in the sequence (supporting both "twenty-one" and "21" formats).
+        *   Iterate through the globally stored `wordTimestamps` array.
+        *   For each word entry, normalize the `text` (trimmed, lowercased, punctuation removed) and check if it matches the next expected number in the sequence (supporting both "twenty-one" and "21" formats).
         *   **Flexible Matching:** Handle transcription variations (e.g., "twenty one" vs "twenty-one", "1st" vs "one", etc.).
         *   If the correct sequential number is found, store its **end timestamp** as a split point. Increment the number counter.
     *   **Audio Slicing and Encoding (Using Original Audio):**
@@ -217,6 +280,52 @@ The application should have four distinct states:
         *   Use proper cleanup with `regions.destroy()` when switching files
         *   Handle cases where regions plugin fails to initialize
 
+**7.5. Robust Progress Indicator Handling**
+
+**Context:** The application relies on the `progress_callback` function from the Hugging Face Transformers.js library to provide real-time feedback during model initialization. This callback is asynchronous and its data structure is not guaranteed to be consistent across all events.
+
+**Problem Statement:** The `progress_callback` sends different types of updates:
+*   **File Download Progress:** `{ status: 'progress', name: 'model.bin', progress: 55.6789 }`
+*   **Status Change:** `{ status: 'done', name: 'model.bin' }` or `{ status: 'initializing' }`
+
+Assuming a fixed data structure can lead to unhandled exceptions when accessing undefined properties.
+
+**Functional Requirements:**
+
+*   **Defensive Data Access:** The `progress_callback` handler MUST NOT assume the existence of the numerical `progress` property on the event object. All access to this property must be conditional.
+
+*   **Type Validation:** Before attempting to perform any number-specific operations (like `.toFixed()`) on the `progress` property, the code MUST first execute a check to verify that the property both exists and is of type `number`.
+
+*   **Differentiated UI Updates:** The user-facing status message must intelligently adapt to the information provided:
+    *   **When numerical `progress` property is present:** Display both status and formatted percentage
+        *   Example: `"Downloading model... (45.50%)"`
+    *   **When numerical `progress` property is absent:** Display only status text without percentage
+        *   Example: `"Initializing model..."` or `"Download complete"`
+
+*   **Zero-Crash Guarantee:** The implementation must prevent any `TypeError` or unhandled runtime exceptions, regardless of the data structure passed by the Transformers.js library.
+
+**Required Implementation Pattern:**
+```javascript
+function handleProgressCallback(progress) {
+    let statusText = `Initializing Model... ${progress.status}`;
+
+    // CRITICAL: Defensive check before accessing progress.progress
+    if (typeof progress.progress === 'number') {
+        const percent = progress.progress.toFixed(2);
+        statusText += ` (${percent}%)`;
+    }
+
+    updateStatus(statusText);
+}
+
+// Usage in transcriber initialization
+const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+    device: 'webgpu',
+    dtype: 'q4',
+    progress_callback: handleProgressCallback
+});
+```
+
 ### **8. Implementation Structure**
 
 **Recommended HTML Structure:**
@@ -277,7 +386,7 @@ The application should have four distinct states:
                     device = 'cpu';
                 }
 
-                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
+                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
                     device: device,
                     dtype: device === 'webgpu' ? 'q4' : 'fp32'
                 });

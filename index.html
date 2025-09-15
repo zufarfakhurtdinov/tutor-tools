@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Transcription & Segmentation Tool</title>
+
+    <!-- Load utility libraries via CDN (available globally) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js"></script>
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        #app {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+
+        #error-display {
+            margin-bottom: 20px;
+        }
+
+        .error-message {
+            background: #ffe6e6;
+            border: 1px solid #ff9999;
+            color: #cc0000;
+            padding: 15px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+
+        #dropzone {
+            border: 3px dashed #4A90E2;
+            border-radius: 12px;
+            padding: 60px 20px;
+            text-align: center;
+            background: #f8fbff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 1.2em;
+            color: #4A90E2;
+            font-weight: 600;
+        }
+
+        #dropzone:hover {
+            background: #e3f2fd;
+            border-color: #1976D2;
+            transform: translateY(-2px);
+        }
+
+        #dropzone.disabled {
+            background: #f5f5f5;
+            border-color: #ccc;
+            color: #999;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #dropzone.disabled:hover {
+            background: #f5f5f5;
+            border-color: #ccc;
+            transform: none;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .processing {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #4A90E2;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .status-text {
+            font-size: 1.1em;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4A90E2, #1976D2);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        #waveform {
+            margin: 20px 0;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .controls-section {
+            margin: 20px 0;
+        }
+
+        .controls-section h3 {
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 1.3em;
+        }
+
+        .playback-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            background: #4A90E2;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: #1976D2;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-primary {
+            background: #28a745;
+        }
+
+        .btn-primary:hover {
+            background: #218838;
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .btn-secondary:hover {
+            background: #545b62;
+            box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
+        }
+
+        #transcript {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Georgia', serif;
+            font-size: 1.1em;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .word-span {
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 3px;
+            transition: all 0.2s ease;
+        }
+
+        .word-span:hover {
+            background: #e3f2fd;
+        }
+
+        .word-span.highlighted {
+            background: #ffeb3b;
+            color: #000;
+            font-weight: 600;
+        }
+
+        .transcript-placeholder {
+            color: #6c757d;
+            font-style: italic;
+            text-align: center;
+            padding: 40px;
+        }
+
+        #downloads {
+            margin-top: 30px;
+        }
+
+        .download-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .download-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .download-item:last-child {
+            border-bottom: none;
+        }
+
+        .segment-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .segment-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .segment-duration {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .state-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            z-index: 1000;
+        }
+
+        @media (max-width: 768px) {
+            #app {
+                padding: 10px;
+            }
+
+            .container {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .playback-controls {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="state-indicator" id="stateIndicator">State 1: Initializing</div>
+
+    <div id="app">
+        <div class="header">
+            <h1>🎵 Audio Transcription & Segmentation</h1>
+            <p>Upload an audio file to transcribe and split it by spoken numbers</p>
+        </div>
+
+        <div class="container">
+            <div id="error-display" style="display: none;"></div>
+
+            <!-- State 1 & 2: File Upload -->
+            <div id="upload-section">
+                <div id="dropzone" class="disabled">
+                    <div>📁 Initializing AI Model...</div>
+                    <div style="font-size: 0.9em; margin-top: 10px; opacity: 0.7;">
+                        Please wait while we load the transcription model
+                    </div>
+                </div>
+                <input type="file" id="fileInput" class="file-input" accept="audio/*">
+
+                <div id="processing" class="processing hidden">
+                    <div class="spinner"></div>
+                    <div class="status-text" id="statusText">Processing...</div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- State 3 & 4: Results -->
+            <div id="results-section" class="hidden">
+                <div class="controls-section">
+                    <h3>🎵 Audio Player</h3>
+                    <div id="waveform"></div>
+                    <div class="playback-controls">
+                        <button id="playBtn" class="btn">
+                            <span id="playIcon">▶️</span>
+                            <span id="playText">Play</span>
+                        </button>
+                        <button id="stopBtn" class="btn btn-secondary">
+                            <span>⏹️</span>
+                            <span>Stop</span>
+                        </button>
+                        <button id="splitBtn" class="btn btn-primary">
+                            <span>✂️</span>
+                            <span>Find & Split Segments</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="controls-section">
+                    <h3>📝 Interactive Transcript</h3>
+                    <div id="transcript">
+                        <div class="transcript-placeholder">
+                            Transcript will appear here after processing...
+                        </div>
+                    </div>
+                </div>
+
+                <div id="downloads" class="hidden">
+                    <div class="controls-section">
+                        <h3>📥 Download Segments</h3>
+                        <div class="download-section">
+                            <div style="margin-bottom: 20px;">
+                                <button id="downloadAllBtn" class="btn btn-primary">
+                                    <span>📦</span>
+                                    <span>Download All as ZIP</span>
+                                </button>
+                            </div>
+                            <div id="downloadList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import modern libraries as ES modules
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js';
+        import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js';
+        import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js';
+
+        // Global variables
+        let transcriber, wavesurfer, regions;
+        let wordTimestamps = [];
+        let originalBuffer = null;
+        let splitTimestamps = [];
+        let audioSegments = [];
+        let currentState = 1;
+
+        // DOM elements
+        const dropzone = document.getElementById('dropzone');
+        const fileInput = document.getElementById('fileInput');
+        const errorDisplay = document.getElementById('error-display');
+        const uploadSection = document.getElementById('upload-section');
+        const resultsSection = document.getElementById('results-section');
+        const processing = document.getElementById('processing');
+        const statusText = document.getElementById('statusText');
+        const progressFill = document.getElementById('progressFill');
+        const transcript = document.getElementById('transcript');
+        const playBtn = document.getElementById('playBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const splitBtn = document.getElementById('splitBtn');
+        const downloads = document.getElementById('downloads');
+        const downloadList = document.getElementById('downloadList');
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
+        const stateIndicator = document.getElementById('stateIndicator');
+
+        // Utility functions
+        function showError(message) {
+            console.error('Audio App Error:', message);
+            errorDisplay.innerHTML = `<div class="error-message">${message}</div>`;
+            errorDisplay.style.display = 'block';
+        }
+
+        function hideError() {
+            errorDisplay.style.display = 'none';
+        }
+
+        function updateState(state, description) {
+            currentState = state;
+            stateIndicator.textContent = `State ${state}: ${description}`;
+            console.log(`State changed to ${state}: ${description}`);
+        }
+
+        function updateProgress(percentage, status) {
+            progressFill.style.width = `${percentage}%`;
+            statusText.textContent = status;
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function formatFileSize(bytes) {
+            const units = ['B', 'KB', 'MB', 'GB'];
+            let size = bytes;
+            let unitIndex = 0;
+
+            while (size >= 1024 && unitIndex < units.length - 1) {
+                size /= 1024;
+                unitIndex++;
+            }
+
+            return `${size.toFixed(1)} ${units[unitIndex]}`;
+        }
+
+        // Progress callback handler with defensive programming
+        function handleProgressCallback(progress) {
+            let statusText = `Initializing Model... ${progress.status}`;
+
+            // CRITICAL: Defensive check before accessing progress.progress
+            if (typeof progress.progress === 'number') {
+                const percent = progress.progress.toFixed(2);
+                statusText += ` (${percent}%)`;
+                updateProgress(progress.progress, statusText);
+            } else {
+                document.getElementById('statusText').textContent = statusText;
+            }
+        }
+
+        async function initializeApp() {
+            try {
+                hideError();
+                updateState(1, 'Initializing');
+
+                // Configure environment for remote model loading
+                env.allowRemoteModels = true;
+                env.allowLocalModels = false;
+
+                console.log('Initializing transcription model: Xenova/whisper-tiny');
+
+                // Initialize AI model with WebGPU fallback to CPU
+                let device = 'webgpu';
+                try {
+                    // Test WebGPU availability
+                    if (!navigator.gpu) {
+                        console.log('WebGPU not available, falling back to CPU');
+                        device = 'cpu';
+                    }
+                } catch (error) {
+                    console.log('WebGPU test failed, falling back to CPU:', error);
+                    device = 'cpu';
+                }
+
+                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+                    device: device,
+                    dtype: device === 'webgpu' ? 'q4' : 'fp32',
+                    progress_callback: handleProgressCallback
+                });
+
+                console.log(`Transcriber initialized with device: ${device}`);
+
+                // Initialize WaveSurfer with complete configuration
+                wavesurfer = WaveSurfer.create({
+                    container: '#waveform',
+                    waveColor: '#4A90E2',
+                    progressColor: '#1976D2',
+                    interact: true,
+                    dragToSeek: true,
+                    height: 100,
+                    normalize: true
+                });
+
+                // Initialize Regions plugin with proper registration
+                regions = wavesurfer.registerPlugin(Regions.create({
+                    dragSelection: false // Prevent accidental region creation
+                }));
+
+                // Setup event handlers
+                setupEventHandlers();
+
+                // Enable file upload
+                dropzone.classList.remove('disabled');
+                dropzone.innerHTML = `
+                    <div>📁 Drop an audio file here or click to select</div>
+                    <div style="font-size: 0.9em; margin-top: 10px; opacity: 0.7;">
+                        Supports WAV, MP3, OGG, FLAC • Max 80MB • Max 60 minutes
+                    </div>
+                `;
+
+                updateState(1, 'Awaiting File');
+                console.log('Application initialized successfully');
+
+            } catch (error) {
+                console.error('Initialization error:', error);
+                showError('Failed to initialize application. Please refresh the page and try again.');
+            }
+        }
+
+        function setupEventHandlers() {
+            // File upload handlers
+            dropzone.addEventListener('click', () => {
+                if (!dropzone.classList.contains('disabled')) {
+                    fileInput.click();
+                }
+            });
+
+            dropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                if (!dropzone.classList.contains('disabled')) {
+                    dropzone.style.background = '#e3f2fd';
+                }
+            });
+
+            dropzone.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                if (!dropzone.classList.contains('disabled')) {
+                    dropzone.style.background = '#f8fbff';
+                }
+            });
+
+            dropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                if (!dropzone.classList.contains('disabled')) {
+                    dropzone.style.background = '#f8fbff';
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        handleFileUpload(files[0]);
+                    }
+                }
+            });
+
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFileUpload(e.target.files[0]);
+                }
+            });
+
+            // Playback control handlers
+            playBtn.addEventListener('click', togglePlayback);
+            stopBtn.addEventListener('click', stopPlayback);
+            splitBtn.addEventListener('click', findAndSplitSegments);
+            downloadAllBtn.addEventListener('click', downloadAllAsZip);
+
+            // WaveSurfer event handlers
+            wavesurfer.on('ready', () => {
+                console.log('WaveSurfer ready - can now add regions safely');
+            });
+
+            wavesurfer.on('play', () => {
+                document.getElementById('playIcon').textContent = '⏸️';
+                document.getElementById('playText').textContent = 'Pause';
+            });
+
+            wavesurfer.on('pause', () => {
+                document.getElementById('playIcon').textContent = '▶️';
+                document.getElementById('playText').textContent = 'Play';
+                clearTranscriptHighlight();
+            });
+
+            wavesurfer.on('finish', () => {
+                document.getElementById('playIcon').textContent = '▶️';
+                document.getElementById('playText').textContent = 'Play';
+                clearTranscriptHighlight();
+            });
+
+            // Real-time highlighting during playback
+            wavesurfer.on('timeupdate', (currentTime) => {
+                updateTranscriptHighlight(currentTime);
+            });
+
+            wavesurfer.on('destroy', () => {
+                if (regions) {
+                    regions.destroy();
+                }
+            });
+        }
+
+        async function handleFileUpload(file) {
+            try {
+                hideError();
+
+                // Validate file
+                if (!validateFile(file)) {
+                    return;
+                }
+
+                updateState(2, 'Processing File');
+
+                // Hide upload section and show processing
+                uploadSection.classList.add('hidden');
+                processing.classList.remove('hidden');
+
+                updateProgress(0, 'Loading audio file...');
+
+                // Create object URL for the file
+                const fileUrl = URL.createObjectURL(file);
+
+                // Step 1: Load into WaveSurfer first
+                updateProgress(10, 'Loading audio into waveform...');
+                await wavesurfer.load(fileUrl);
+
+                // Step 2: Extract original buffer
+                updateProgress(20, 'Extracting audio data...');
+                originalBuffer = wavesurfer.getDecodedData();
+
+                if (!originalBuffer) {
+                    throw new Error('Failed to extract audio data from file');
+                }
+
+                console.log(`Original audio: ${originalBuffer.sampleRate}Hz, ${originalBuffer.numberOfChannels} channels, ${originalBuffer.duration.toFixed(2)}s`);
+
+                // Step 3: Process transcription
+                updateProgress(30, 'Starting transcription...');
+                await processTranscription(originalBuffer);
+
+                // Clean up object URL
+                URL.revokeObjectURL(fileUrl);
+
+                // Transition to State 3
+                showTranscriptionResults();
+
+            } catch (error) {
+                console.error('File processing error:', error);
+                showError(`Failed to process audio file: ${error.message}`);
+                resetToInitialState();
+            }
+        }
+
+        function validateFile(file) {
+            // Check file size (80MB limit)
+            const maxSize = 80 * 1024 * 1024;
+            if (file.size > maxSize) {
+                showError(`File too large. Maximum size is 80MB. Your file is ${formatFileSize(file.size)}.`);
+                return false;
+            }
+
+            // Check file type
+            const validTypes = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/ogg', 'audio/flac', 'audio/x-flac'];
+            if (!validTypes.includes(file.type) && !file.name.match(/\.(wav|mp3|ogg|flac)$/i)) {
+                showError('Unsupported file format. Please use WAV, MP3, OGG, or FLAC files.');
+                return false;
+            }
+
+            return true;
+        }
+
+        async function processTranscription(audioBuffer) {
+            try {
+                // Clear previous results
+                wordTimestamps = [];
+
+                // Create transcription-specific buffer (16kHz mono)
+                updateProgress(35, 'Preparing audio for transcription...');
+                const transcriptionBuffer = await createTranscriptionBuffer(audioBuffer);
+
+                // Check duration limit (60 minutes)
+                if (transcriptionBuffer.duration > 3600) {
+                    throw new Error(`Audio too long. Maximum duration is 60 minutes. Your audio is ${Math.round(transcriptionBuffer.duration / 60)} minutes.`);
+                }
+
+                // Process in chunks with progress tracking
+                const chunkDuration = 30; // 30 seconds per chunk
+                const totalChunks = Math.ceil(transcriptionBuffer.duration / chunkDuration);
+
+                console.log(`Processing ${totalChunks} chunks of ${chunkDuration}s each`);
+
+                for (let i = 0; i < totalChunks; i++) {
+                    const startTime = i * chunkDuration;
+                    const endTime = Math.min(startTime + chunkDuration, transcriptionBuffer.duration);
+
+                    updateProgress(
+                        35 + (i / totalChunks) * 55,
+                        `Processing chunk ${i + 1} of ${totalChunks}... (${formatTime(startTime)} - ${formatTime(endTime)})`
+                    );
+
+                    // Extract chunk
+                    const chunkBuffer = extractAudioChunk(transcriptionBuffer, startTime, endTime);
+
+                    // Transcribe chunk
+                    const result = await transcriber(chunkBuffer, {
+                        language: 'english',
+                        task: 'transcribe',
+                        return_timestamps: 'word',
+                        chunk_length_s: 30,
+                        stride_length_s: 5
+                    });
+
+                    // Process and append word timestamps
+                    if (result.chunks && result.chunks.length > 0) {
+                        for (const chunk of result.chunks) {
+                            if (chunk.timestamp && chunk.timestamp.length === 2) {
+                                // Adjust timestamps relative to chunk start
+                                const adjustedStart = chunk.timestamp[0] + startTime;
+                                const adjustedEnd = chunk.timestamp[1] + startTime;
+
+                                wordTimestamps.push({
+                                    text: chunk.text.trim(),
+                                    start: adjustedStart,
+                                    end: adjustedEnd
+                                });
+                            }
+                        }
+                    }
+
+                    // Update partial transcript display
+                    updatePartialTranscript();
+
+                    // Clean up chunk buffer
+                    // (JavaScript garbage collection will handle this)
+                }
+
+                updateProgress(95, 'Finalizing transcription...');
+
+                console.log(`Transcription complete: ${wordTimestamps.length} words processed`);
+
+                if (wordTimestamps.length === 0) {
+                    throw new Error('No words were transcribed from the audio. Please check that the audio contains clear speech.');
+                }
+
+                updateProgress(100, 'Transcription complete!');
+
+            } catch (error) {
+                console.error('Transcription error:', error);
+                throw new Error(`Transcription failed: ${error.message}`);
+            }
+        }
+
+        async function createTranscriptionBuffer(originalBuffer) {
+            // Create new AudioContext with 16kHz sample rate for transcription
+            const transcriptionContext = new (window.AudioContext || window.webkitAudioContext)({
+                sampleRate: 16000
+            });
+
+            // Resample to 16kHz
+            const resampledBuffer = await resampleBuffer(originalBuffer, 16000, transcriptionContext);
+
+            // Convert to mono if needed
+            const monoBuffer = convertToMono(resampledBuffer, transcriptionContext);
+
+            return monoBuffer;
+        }
+
+        async function resampleBuffer(sourceBuffer, targetSampleRate, targetContext) {
+            if (sourceBuffer.sampleRate === targetSampleRate) {
+                return sourceBuffer;
+            }
+
+            const offlineContext = new OfflineAudioContext(
+                sourceBuffer.numberOfChannels,
+                Math.ceil(sourceBuffer.duration * targetSampleRate),
+                targetSampleRate
+            );
+
+            const source = offlineContext.createBufferSource();
+            source.buffer = sourceBuffer;
+            source.connect(offlineContext.destination);
+            source.start();
+
+            return await offlineContext.startRendering();
+        }
+
+        function convertToMono(buffer, context) {
+            if (buffer.numberOfChannels === 1) {
+                return buffer;
+            }
+
+            const monoBuffer = context.createBuffer(1, buffer.length, buffer.sampleRate);
+            const monoData = monoBuffer.getChannelData(0);
+
+            if (buffer.numberOfChannels === 2) {
+                const leftData = buffer.getChannelData(0);
+                const rightData = buffer.getChannelData(1);
+
+                for (let i = 0; i < buffer.length; i++) {
+                    monoData[i] = (leftData[i] + rightData[i]) / 2;
+                }
+            } else {
+                // For more than 2 channels, average all channels
+                for (let i = 0; i < buffer.length; i++) {
+                    let sum = 0;
+                    for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+                        sum += buffer.getChannelData(channel)[i];
+                    }
+                    monoData[i] = sum / buffer.numberOfChannels;
+                }
+            }
+
+            return monoBuffer;
+        }
+
+        function extractAudioChunk(buffer, startTime, endTime) {
+            const sampleRate = buffer.sampleRate;
+            const startSample = Math.floor(startTime * sampleRate);
+            const endSample = Math.floor(endTime * sampleRate);
+            const chunkLength = endSample - startSample;
+
+            const chunkBuffer = new AudioContext().createBuffer(
+                buffer.numberOfChannels,
+                chunkLength,
+                sampleRate
+            );
+
+            for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+                const sourceData = buffer.getChannelData(channel);
+                const chunkData = chunkBuffer.getChannelData(channel);
+
+                for (let i = 0; i < chunkLength; i++) {
+                    chunkData[i] = sourceData[startSample + i] || 0;
+                }
+            }
+
+            return chunkBuffer;
+        }
+
+        function updatePartialTranscript() {
+            if (wordTimestamps.length === 0) return;
+
+            const transcriptText = wordTimestamps.map(word => word.text).join(' ');
+            transcript.innerHTML = `<div style="color: #333;">${transcriptText}</div>`;
+        }
+
+        function showTranscriptionResults() {
+            updateState(3, 'Transcription Results');
+
+            // Hide processing and show results
+            processing.classList.add('hidden');
+            resultsSection.classList.remove('hidden');
+            resultsSection.classList.add('fade-in');
+
+            // Populate interactive transcript
+            populateTranscript(wordTimestamps);
+
+            // Enable split button if we have valid word timestamps
+            if (wordTimestamps && wordTimestamps.length > 0) {
+                splitBtn.disabled = false;
+            } else {
+                splitBtn.disabled = true;
+                showError('Word-level timestamp data is not available. Splitting functionality is disabled.');
+            }
+        }
+
+        function populateTranscript(wordData) {
+            if (!wordData || wordData.length === 0) {
+                transcript.innerHTML = '<div class="transcript-placeholder">No transcript available</div>';
+                return;
+            }
+
+            // Create interactive transcript with word spans
+            const transcriptHtml = wordData.map((word, index) => {
+                return `<span class="word-span" data-start-time="${word.start}" data-end-time="${word.end}" data-word-index="${index}">${word.text}</span>`;
+            }).join(' ');
+
+            transcript.innerHTML = transcriptHtml;
+
+            // Add click-to-seek functionality
+            transcript.addEventListener('click', handleTranscriptClick);
+        }
+
+        function handleTranscriptClick(event) {
+            if (event.target.classList.contains('word-span')) {
+                const startTime = parseFloat(event.target.getAttribute('data-start-time'));
+                if (!isNaN(startTime)) {
+                    wavesurfer.seekTo(startTime / wavesurfer.getDuration());
+                    wavesurfer.play();
+                }
+            }
+        }
+
+        function updateTranscriptHighlight(currentTime) {
+            if (!wordTimestamps || wordTimestamps.length === 0) return;
+
+            // Clear previous highlights
+            clearTranscriptHighlight();
+
+            // Find current word
+            const currentWord = wordTimestamps.find(word =>
+                currentTime >= word.start && currentTime <= word.end
+            );
+
+            if (currentWord) {
+                const wordSpans = transcript.querySelectorAll('.word-span');
+                const wordIndex = wordTimestamps.indexOf(currentWord);
+
+                if (wordSpans[wordIndex]) {
+                    wordSpans[wordIndex].classList.add('highlighted');
+
+                    // Auto-scroll to keep highlighted word visible
+                    wordSpans[wordIndex].scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center'
+                    });
+                }
+            }
+        }
+
+        function clearTranscriptHighlight() {
+            const highlighted = transcript.querySelectorAll('.highlighted');
+            highlighted.forEach(span => span.classList.remove('highlighted'));
+        }
+
+        function togglePlayback() {
+            if (wavesurfer.isPlaying()) {
+                wavesurfer.pause();
+            } else {
+                wavesurfer.play();
+            }
+        }
+
+        function stopPlayback() {
+            wavesurfer.stop();
+            clearTranscriptHighlight();
+        }
+
+        async function findAndSplitSegments() {
+            try {
+                hideError();
+
+                if (!wordTimestamps || wordTimestamps.length === 0) {
+                    showError('No word-level timestamp data available for splitting.');
+                    return;
+                }
+
+                splitBtn.disabled = true;
+                splitBtn.innerHTML = '<span>⏳</span><span>Processing...</span>';
+
+                updateProgress(0, 'Analyzing transcript for numbers...');
+
+                // Find number sequences
+                const numberSequence = findNumberSequence(wordTimestamps);
+
+                if (numberSequence.length < 2) {
+                    showError('Could not find a sequence of at least 2 consecutive numbers in the transcript. Please ensure your audio contains spoken numbers like "one, two, three" or "1, 2, 3".');
+                    resetSplitButton();
+                    return;
+                }
+
+                console.log(`Found ${numberSequence.length} numbers in sequence:`, numberSequence.map(n => n.number));
+
+                // Extract split timestamps (end times of each number)
+                splitTimestamps = numberSequence.map(item => item.timestamp);
+
+                updateProgress(30, 'Creating audio segments...');
+
+                // Create segments from original buffer
+                await createAudioSegments();
+
+                updateProgress(90, 'Adding split markers to waveform...');
+
+                // Add visual markers to waveform
+                addSplitMarkers();
+
+                updateProgress(100, 'Segmentation complete!');
+
+                // Show download section
+                downloads.classList.remove('hidden');
+                downloads.classList.add('fade-in');
+
+                // Update state
+                updateState(4, 'Segmented Results');
+
+                // Reset split button
+                resetSplitButton();
+
+                // Populate download list
+                populateDownloadList();
+
+            } catch (error) {
+                console.error('Segmentation error:', error);
+                showError(`Failed to split audio: ${error.message}`);
+                resetSplitButton();
+            }
+        }
+
+        function findNumberSequence(words) {
+            // Number mappings for 1-99
+            const numberWords = {
+                'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+                'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+                'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15,
+                'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20,
+                'twenty-one': 21, 'twenty-two': 22, 'twenty-three': 23, 'twenty-four': 24, 'twenty-five': 25,
+                'twenty-six': 26, 'twenty-seven': 27, 'twenty-eight': 28, 'twenty-nine': 29, 'thirty': 30,
+                'thirty-one': 31, 'thirty-two': 32, 'thirty-three': 33, 'thirty-four': 34, 'thirty-five': 35,
+                'thirty-six': 36, 'thirty-seven': 37, 'thirty-eight': 38, 'thirty-nine': 39, 'forty': 40,
+                'forty-one': 41, 'forty-two': 42, 'forty-three': 43, 'forty-four': 44, 'forty-five': 45,
+                'forty-six': 46, 'forty-seven': 47, 'forty-eight': 48, 'forty-nine': 49, 'fifty': 50,
+                'fifty-one': 51, 'fifty-two': 52, 'fifty-three': 53, 'fifty-four': 54, 'fifty-five': 55,
+                'fifty-six': 56, 'fifty-seven': 57, 'fifty-eight': 58, 'fifty-nine': 59, 'sixty': 60,
+                'sixty-one': 61, 'sixty-two': 62, 'sixty-three': 63, 'sixty-four': 64, 'sixty-five': 65,
+                'sixty-six': 66, 'sixty-seven': 67, 'sixty-eight': 68, 'sixty-nine': 69, 'seventy': 70,
+                'seventy-one': 71, 'seventy-two': 72, 'seventy-three': 73, 'seventy-four': 74, 'seventy-five': 75,
+                'seventy-six': 76, 'seventy-seven': 77, 'seventy-eight': 78, 'seventy-nine': 79, 'eighty': 80,
+                'eighty-one': 81, 'eighty-two': 82, 'eighty-three': 83, 'eighty-four': 84, 'eighty-five': 85,
+                'eighty-six': 86, 'eighty-seven': 87, 'eighty-eight': 88, 'eighty-nine': 89, 'ninety': 90,
+                'ninety-one': 91, 'ninety-two': 92, 'ninety-three': 93, 'ninety-four': 94, 'ninety-five': 95,
+                'ninety-six': 96, 'ninety-seven': 97, 'ninety-eight': 98, 'ninety-nine': 99
+            };
+
+            const sequence = [];
+            let expectedNumber = 1;
+
+            for (const word of words) {
+                // Normalize word text
+                const normalizedText = word.text.toLowerCase()
+                    .replace(/[.,!?;:"']/g, '') // Remove punctuation
+                    .replace(/\s+/g, ' ') // Normalize whitespace
+                    .trim();
+
+                // Check for number match (both word and digit forms)
+                let matchedNumber = null;
+
+                // Check word form
+                if (numberWords[normalizedText] === expectedNumber) {
+                    matchedNumber = expectedNumber;
+                }
+                // Check digit form
+                else if (parseInt(normalizedText) === expectedNumber) {
+                    matchedNumber = expectedNumber;
+                }
+                // Check variations (e.g., "twenty one" vs "twenty-one")
+                else {
+                    const spacedVersion = normalizedText.replace('-', ' ');
+                    if (numberWords[spacedVersion] === expectedNumber) {
+                        matchedNumber = expectedNumber;
+                    }
+                }
+
+                if (matchedNumber) {
+                    sequence.push({
+                        number: matchedNumber,
+                        timestamp: word.end, // Use end timestamp for split point
+                        word: word
+                    });
+                    expectedNumber++;
+                }
+            }
+
+            return sequence;
+        }
+
+        async function createAudioSegments() {
+            audioSegments = [];
+
+            if (!originalBuffer || splitTimestamps.length === 0) {
+                throw new Error('No audio data or split points available');
+            }
+
+            // Create segments based on split timestamps
+            const segmentBoundaries = [0, ...splitTimestamps];
+
+            for (let i = 0; i < segmentBoundaries.length - 1; i++) {
+                const startTime = segmentBoundaries[i];
+                const endTime = segmentBoundaries[i + 1];
+
+                updateProgress(
+                    30 + (i / (segmentBoundaries.length - 1)) * 50,
+                    `Creating segment ${i + 1} of ${segmentBoundaries.length - 1}...`
+                );
+
+                // Extract segment from original buffer
+                const segmentBuffer = extractAudioChunk(originalBuffer, startTime, endTime);
+
+                // Encode to MP3
+                const mp3Blob = await encodeToMp3(segmentBuffer);
+
+                audioSegments.push({
+                    name: `${i + 1}.mp3`,
+                    blob: mp3Blob,
+                    duration: endTime - startTime,
+                    size: mp3Blob.size
+                });
+            }
+
+            console.log(`Created ${audioSegments.length} audio segments`);
+        }
+
+        async function encodeToMp3(audioBuffer) {
+            return new Promise((resolve, reject) => {
+                try {
+                    // Determine encoding parameters based on original audio
+                    const sampleRate = audioBuffer.sampleRate;
+                    const channels = audioBuffer.numberOfChannels;
+                    const bitrate = 128; // Use 128kbps for good quality
+
+                    // Initialize LAME encoder
+                    const mp3Encoder = new lamejs.Mp3Encoder(channels, sampleRate, bitrate);
+                    const mp3Data = [];
+
+                    // Convert float32 to int16
+                    const samples = new Int16Array(audioBuffer.length * channels);
+
+                    if (channels === 1) {
+                        // Mono
+                        const channelData = audioBuffer.getChannelData(0);
+                        for (let i = 0; i < channelData.length; i++) {
+                            samples[i] = Math.max(-32768, Math.min(32767, channelData[i] * 32768));
+                        }
+                    } else {
+                        // Stereo
+                        const leftData = audioBuffer.getChannelData(0);
+                        const rightData = audioBuffer.getChannelData(1);
+                        for (let i = 0; i < leftData.length; i++) {
+                            samples[i * 2] = Math.max(-32768, Math.min(32767, leftData[i] * 32768));
+                            samples[i * 2 + 1] = Math.max(-32768, Math.min(32767, rightData[i] * 32768));
+                        }
+                    }
+
+                    // Encode in chunks
+                    const chunkSize = 1152; // Standard MP3 frame size
+                    for (let i = 0; i < samples.length; i += chunkSize * channels) {
+                        const chunk = samples.slice(i, i + chunkSize * channels);
+                        let mp3buf;
+
+                        if (channels === 1) {
+                            mp3buf = mp3Encoder.encodeBuffer(chunk);
+                        } else {
+                            // Split interleaved stereo data
+                            const left = new Int16Array(chunkSize);
+                            const right = new Int16Array(chunkSize);
+                            for (let j = 0; j < chunkSize && (i + j * 2) < samples.length; j++) {
+                                left[j] = chunk[j * 2] || 0;
+                                right[j] = chunk[j * 2 + 1] || 0;
+                            }
+                            mp3buf = mp3Encoder.encodeBuffer(left, right);
+                        }
+
+                        if (mp3buf.length > 0) {
+                            mp3Data.push(mp3buf);
+                        }
+                    }
+
+                    // Finalize encoding
+                    const finalBuf = mp3Encoder.flush();
+                    if (finalBuf.length > 0) {
+                        mp3Data.push(finalBuf);
+                    }
+
+                    // Create blob
+                    const blob = new Blob(mp3Data, { type: 'audio/mp3' });
+                    resolve(blob);
+
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        }
+
+        function addSplitMarkers() {
+            if (!regions || splitTimestamps.length === 0) return;
+
+            // Clear existing regions
+            regions.clearRegions();
+
+            // Add markers at split points
+            splitTimestamps.forEach((timestamp, index) => {
+                regions.addRegion({
+                    start: timestamp,
+                    end: timestamp + 0.1, // 0.1 second marker width
+                    color: 'rgba(255, 0, 0, 0.3)',
+                    drag: false,
+                    resize: false,
+                    content: `Split ${index + 1}`,
+                    id: `split-${index + 1}`
+                });
+            });
+
+            console.log(`Added ${splitTimestamps.length} split markers to waveform`);
+        }
+
+        function populateDownloadList() {
+            if (audioSegments.length === 0) {
+                downloadList.innerHTML = '<div>No segments available</div>';
+                return;
+            }
+
+            const listHtml = audioSegments.map((segment, index) => {
+                const url = URL.createObjectURL(segment.blob);
+                return `
+                    <div class="download-item">
+                        <div class="segment-info">
+                            <div class="segment-name">Segment ${index + 1}</div>
+                            <div class="segment-duration">
+                                Duration: ${formatTime(segment.duration)} •
+                                Size: ${formatFileSize(segment.size)}
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary" onclick="downloadSegment('${url}', '${segment.name}')">
+                            <span>⬇️</span>
+                            <span>Download</span>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+
+            downloadList.innerHTML = listHtml;
+        }
+
+        // Make downloadSegment function global for onclick handlers
+        window.downloadSegment = function(url, filename) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        };
+
+        async function downloadAllAsZip() {
+            try {
+                if (audioSegments.length === 0) {
+                    showError('No segments available for download');
+                    return;
+                }
+
+                downloadAllBtn.disabled = true;
+                downloadAllBtn.innerHTML = '<span>⏳</span><span>Creating ZIP...</span>';
+
+                updateProgress(0, 'Creating ZIP archive...');
+
+                const zip = new JSZip();
+
+                // Add each segment to ZIP
+                for (let i = 0; i < audioSegments.length; i++) {
+                    const segment = audioSegments[i];
+                    updateProgress(
+                        (i / audioSegments.length) * 90,
+                        `Adding ${segment.name} to archive... (${i + 1}/${audioSegments.length})`
+                    );
+
+                    zip.file(segment.name, segment.blob);
+                }
+
+                updateProgress(95, 'Generating ZIP file...');
+
+                // Generate ZIP blob
+                const zipBlob = await zip.generateAsync({
+                    type: 'blob',
+                    compression: 'DEFLATE',
+                    compressionOptions: { level: 6 }
+                });
+
+                updateProgress(100, 'ZIP created successfully!');
+
+                // Download ZIP
+                const url = URL.createObjectURL(zipBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'split_audio.zip';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                // Reset button
+                downloadAllBtn.disabled = false;
+                downloadAllBtn.innerHTML = '<span>📦</span><span>Download All as ZIP</span>';
+
+            } catch (error) {
+                console.error('ZIP creation error:', error);
+                showError(`Failed to create ZIP archive: ${error.message}`);
+                downloadAllBtn.disabled = false;
+                downloadAllBtn.innerHTML = '<span>📦</span><span>Download All as ZIP</span>';
+            }
+        }
+
+        function resetSplitButton() {
+            splitBtn.disabled = false;
+            splitBtn.innerHTML = '<span>✂️</span><span>Find & Split Segments</span>';
+        }
+
+        function resetToInitialState() {
+            // Reset all variables
+            wordTimestamps = [];
+            originalBuffer = null;
+            splitTimestamps = [];
+            audioSegments = [];
+
+            // Reset UI
+            uploadSection.classList.remove('hidden');
+            resultsSection.classList.add('hidden');
+            processing.classList.add('hidden');
+            downloads.classList.add('hidden');
+
+            // Reset file input
+            fileInput.value = '';
+
+            // Reset progress
+            updateProgress(0, '');
+
+            updateState(1, 'Awaiting File');
+        }
+
+        console.log('Starting application initialization...');
+        initializeApp();
+    </script>
+</body>
+</html>

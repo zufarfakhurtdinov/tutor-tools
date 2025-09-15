@@ -1,0 +1,24 @@
+{
+  "name": "tutor-tools",
+  "version": "1.0.0",
+  "description": "",
+  "main": "interactive_transcript_implementation.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zufarfakhurtdinov/tutor-tools.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/zufarfakhurtdinov/tutor-tools/issues"
+  },
+  "homepage": "https://github.com/zufarfakhurtdinov/tutor-tools#readme",
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}

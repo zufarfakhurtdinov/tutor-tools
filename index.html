@@ -7,7 +7,7 @@
 
     <!-- Load utility libraries via CDN (available globally) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.all.js"></script>
 
     <style>
         * {
@@ -507,6 +507,22 @@
             try {
                 hideError();
                 updateState(1, 'Initializing');
+
+                // CRITICAL: Verify all required CDN libraries are loaded first
+                if (typeof lamejs === 'undefined') {
+                    const lameLib = window.lamejs || window.LAME || window.lame;
+                    if (!lameLib || !lameLib.Mp3Encoder) {
+                        throw new Error('lamejs library not loaded. Please check CDN connection and ensure lame.all.js is accessible.');
+                    }
+                    // Assign to global lamejs if found under alternative name
+                    window.lamejs = lameLib;
+                }
+
+                if (typeof JSZip === 'undefined') {
+                    throw new Error('JSZip library not loaded. Please check CDN connection.');
+                }
+
+                console.log('All CDN libraries verified successfully');
 
                 // Configure environment for remote model loading
                 env.allowRemoteModels = true;
@@ -1189,6 +1205,15 @@
         async function encodeToMp3(audioBuffer) {
             return new Promise((resolve, reject) => {
                 try {
+                    // Verify lamejs is available before encoding
+                    if (typeof lamejs === 'undefined') {
+                        const lameLib = window.lamejs || window.LAME || window.lame;
+                        if (!lameLib || !lameLib.Mp3Encoder) {
+                            throw new Error('lamejs library not available for MP3 encoding. Please check CDN connection.');
+                        }
+                        window.lamejs = lameLib;
+                    }
+
                     // Determine encoding parameters based on original audio
                     const sampleRate = audioBuffer.sampleRate;
                     const channels = audioBuffer.numberOfChannels;

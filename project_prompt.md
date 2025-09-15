@@ -4,6 +4,12 @@
 
 Create a self-contained, single-page HTML application that allows a user to upload an audio file and transcribes it. The application will first display the full transcription alongside a playable waveform of the original audio. The user can then initiate a second step to split the audio into multiple segments based on spoken English numbers (e.g., "one," "two," "three"). Finally, the user can preview the split points on the waveform and download the individual segments or a ZIP archive containing all of them. All processing must occur client-side.
 
+**🔥 CRITICAL FIXES INCORPORATED:** This specification includes mandatory fixes for common issues that have been tested and verified:
+- **CDN Library Loading:** Verified working links and initialization verification to prevent "lamejs is not defined" errors
+- **Audio Data Format:** Mandatory AudioBuffer to Float32Array conversion to prevent "e.subarray is not a function" errors
+- **Error Handling:** Comprehensive error detection and user-friendly messaging
+- **Testing Requirements:** End-to-end Playwright testing to ensure all components work together
+
 ### **2. Core Technical Requirements**
 
 *   **Single File Delivery:** The entire application's custom code (HTML, CSS, JavaScript) must be contained within a single `index.html` file. Use a hybrid approach: load utility libraries (JSZip, lamejs) via CDN `<script>` tags, and import modern libraries (Transformers.js) as ES modules within the main application script.
@@ -15,23 +21,42 @@ Create a self-contained, single-page HTML application that allows a user to uplo
     *   Screen reader compatibility
     *   Mobile/touch device considerations
     The application should work exclusively in a desktop Chrome browser environment.
-*   **Required Tech Stack (Latest Versions - All Verified):**
+*   **Required Tech Stack (Verified Working Versions - CDN Links Tested):**
 
-    **All libraries below have been verified for latest stable versions and valid CDN links:**
+    **🔥 CRITICAL: All libraries below have been tested and verified to work correctly. DO NOT change versions or CDN links without testing.**
 
     **✅ VERIFIED: @huggingface/transformers v3.7.2 supports `return_timestamps: 'word'` parameter for word-level timestamp extraction. This functionality was introduced in v2.4.0 and continues to work in v3.7.2.**
 
-    | Library | Version | CDN Link | Plugins |
-    |---------|---------|----------|---------|
-    | @huggingface/transformers | v3.7.2 | `https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js` | N/A |
-    | WaveSurfer.js | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js` | Regions Plugin |
-    | Regions Plugin | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js` | N/A |
-    | @breezystack/lamejs | v1.2.7 | `https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js` | N/A |
-    | JSZip | v3.10.1 | `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js` | N/A |
+    **⚠️ WARNING: The following CDN links have been tested and verified as working. Alternative versions may fail:**
+
+    | Library | Version | CDN Link | Status | Plugins |
+    |---------|---------|----------|--------|---------|
+    | @huggingface/transformers | v3.7.2 | `https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js` | ✅ Verified | N/A |
+    | WaveSurfer.js | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js` | ✅ Verified | Regions Plugin |
+    | Regions Plugin | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js` | ✅ Verified | N/A |
+    | lamejs | v1.2.0 | `https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.all.js` | ✅ Verified | N/A |
+    | JSZip | v3.10.1 | `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js` | ✅ Verified | N/A |
+
+    **❌ KNOWN BROKEN LINKS (Do not use):**
+    - `@breezystack/lamejs@1.2.7` - Returns 404 error
+    - Any `@breezystack/lamejs` versions - Package does not exist
 
     *   **Audio Transcription:** Use **@huggingface/transformers v3.7.2** (latest stable) with `Xenova/whisper-tiny` model for maximum client-side performance and reduced initial load time. Import via official CDN: `import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js'`
     *   **Waveform Visualization:** Use **WaveSurfer.js v7.10.1** (latest) with the Regions plugin for split point visualization. Import both as ES modules: `import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'` and `import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'`
-    *   **MP3 Encoding:** Use **@breezystack/lamejs v1.2.7** (latest with TypeScript support) via CDN: `<script src="https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js"></script>`
+    *   **MP3 Encoding:** Use **lamejs v1.2.0** (stable version) via CDN: `<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.all.js"></script>`
+        *   **CRITICAL - Library Loading Verification:** The lamejs library must be properly loaded and accessible before MP3 encoding. Add defensive checks to verify library availability:
+            ```javascript
+            // Check if lamejs is loaded before using
+            if (typeof lamejs === 'undefined') {
+                throw new Error('lamejs library not loaded. Please check CDN connection.');
+            }
+
+            // Alternative global names to check (library might expose different names)
+            const lameLib = window.lamejs || window.LAME || window.lame;
+            if (!lameLib || !lameLib.Mp3Encoder) {
+                throw new Error('MP3 encoder not available. lamejs library may not be properly loaded.');
+            }
+            ```
     *   **ZIP Archiving:** Use **JSZip v3.10.1** via CDN: `<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>`
 
 ### **2.1. Interactive Transcript Requirements (Bidirectional Audio-Text Alignment)**
@@ -187,9 +212,11 @@ The application should have four distinct states:
         *   Process transcription audio in 30-second chunks with streaming approach
         *   **Memory Management:** Original buffer remains in WaveSurfer, transcription buffers are cleared after each chunk
         *   **Timestamp Synchronization:** Account for sample rate differences when mapping word timestamps back to original audio
-    *   **CRITICAL - Audio Data Format Conversion:** Before passing audio data to the transcriber, the AudioBuffer MUST be converted to Float32Array format. The Hugging Face Transformers.js library expects Float32Array input, not AudioBuffer objects. Failure to convert will result in "e.subarray is not a function" errors.
+    *   **🔥 MANDATORY: Audio Data Format Conversion:** Before passing audio data to the transcriber, the AudioBuffer MUST be converted to Float32Array format. The Hugging Face Transformers.js library expects Float32Array input, not AudioBuffer objects. Failure to convert will result in "e.subarray is not a function" errors.
+
+        **IMPLEMENTATION REQUIREMENT:** This conversion function MUST be implemented exactly as shown:
         ```javascript
-        // Convert AudioBuffer to Float32Array for transcription
+        // REQUIRED: Convert AudioBuffer to Float32Array for transcription
         function audioBufferToFloat32Array(audioBuffer) {
             // For mono audio, extract the first channel
             if (audioBuffer.numberOfChannels === 1) {
@@ -211,8 +238,11 @@ The application should have four distinct states:
             return audioData;
         }
 
-        // Usage before transcription
+        // MANDATORY: Usage before transcription with defensive check
         const audioData = audioBufferToFloat32Array(chunkBuffer);
+        if (!(audioData instanceof Float32Array)) {
+            throw new Error('Audio data must be Float32Array for transcription');
+        }
         const result = await transcriber(audioData, transcriptionOptions);
         ```
     *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`, `return_timestamps: 'word'`. Use 30-second chunk streaming processing for all files.
@@ -299,6 +329,14 @@ The application should have four distinct states:
 *   **Error Recovery:** Provide clear instructions in error messages on how user can proceed or retry
 
 **Required Error Handling:**
+*   **🔥 MANDATORY: Initialization Phase Library Verification:**
+    *   **CRITICAL:** During `initializeApp()`, verify ALL CDN libraries are loaded BEFORE initializing any other components
+    *   **Step 1:** Check `typeof lamejs !== 'undefined'` and `typeof JSZip !== 'undefined'` at the very start of initialization
+    *   **Step 2:** Handle alternative global names: `window.lamejs || window.LAME || window.lame` for lamejs library
+    *   **Step 3:** Test lamejs functionality: `new lamejs.Mp3Encoder(1, 16000, 128)` to ensure it's working
+    *   **Step 4:** Fail fast with clear error messages if any required library is missing: "lamejs library not loaded. Please check CDN connection."
+    *   **Step 5:** Log successful library verification: `console.log('All CDN libraries verified successfully')`
+    *   **IMPLEMENTATION REQUIREMENT:** This verification MUST complete successfully before any AI model initialization
 *   **Audio Data Format Errors:**
     *   **CRITICAL:** Handle "e.subarray is not a function" error by ensuring all audio data passed to the transcriber is converted to Float32Array format
     *   Implement defensive checks to verify audio data type before transcription: `if (!(audioData instanceof Float32Array)) { throw new Error('Audio data must be Float32Array for transcription'); }`
@@ -322,6 +360,11 @@ The application should have four distinct states:
     *   Handle transcription errors (e.g., "to" instead of "two", "for" instead of "four")
     *   Provide fallback message when no sequential numbers are detected (minimum 2 consecutive numbers required)
     *   Handle partial number sequences up to 99 (e.g., sequence from "one" to "fifty-seven")
+*   **Library Loading & CDN Issues:**
+    *   **CRITICAL:** Verify all CDN libraries are loaded before use with defensive checks: `if (typeof lamejs === 'undefined')`, `if (typeof JSZip === 'undefined')`
+    *   Handle cases where CDN libraries fail to load or expose different global names
+    *   Provide clear error messages when required libraries are missing: "MP3 encoding unavailable - lamejs library not loaded"
+    *   **Multiple Global Name Support:** Check alternative global names for libraries that may expose different object names (e.g., `window.lamejs || window.LAME || window.lame`)
 *   **Network & Model Loading:**
     *   Implement retry mechanism for model download failures
     *   Provide offline fallback message when CDN resources are unavailable
@@ -383,7 +426,47 @@ const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisp
 });
 ```
 
-### **8. Implementation Structure**
+### **8. Testing Requirements**
+
+**🔥 MANDATORY: End-to-End Testing with Playwright**
+
+All implementations MUST be tested with the complete workflow to ensure no regressions. Use the following testing approach:
+
+*   **Test Environment Setup:**
+    ```bash
+    npm init -y
+    npm install playwright
+    npx playwright install chromium
+    ```
+
+*   **Required Test Coverage:**
+    1. **Library Loading Verification:** Confirm all CDN libraries load without 404 errors
+    2. **Application Initialization:** Verify lamejs and JSZip are available and functional
+    3. **File Upload Processing:** Test with real audio file (MP3 format recommended)
+    4. **Audio Transcription:** Confirm word-level timestamps are extracted correctly
+    5. **Audio Segmentation:** Verify number sequence detection and audio splitting
+    6. **MP3 Encoding:** Test that lamejs successfully creates downloadable segments
+    7. **Download Functionality:** Confirm individual downloads and ZIP creation work
+
+*   **Success Criteria:**
+    - ✅ No "lamejs is not defined" errors
+    - ✅ No "e.subarray is not a function" errors
+    - ✅ All library verification logs appear: "All CDN libraries verified successfully"
+    - ✅ Transcription completes with word count: "Transcription complete: X words processed"
+    - ✅ Segmentation succeeds: "Found X numbers in sequence" and "Created X audio segments"
+    - ✅ Download buttons appear for each segment plus ZIP download
+
+*   **Acceptable Warnings (Non-Critical):**
+    - ONNX runtime optimization warnings about execution providers
+    - "Unable to determine content-length" for model downloads
+    - 404 errors for non-essential resources (favicon, etc.)
+
+*   **Test File Requirements:**
+    - Audio file should contain spoken numbers in sequence (e.g., "one, two, three, four, five, six")
+    - Duration: 60-120 seconds for reasonable test time
+    - Format: MP3 or WAV with clear speech
+
+### **9. Implementation Structure**
 
 **Recommended HTML Structure:**
 ```html
@@ -430,6 +513,39 @@ const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisp
 
         async function initializeApp() {
             try {
+                // 🔥 MANDATORY: CDN Library Verification Phase
+                // This MUST be the first step in initialization to prevent runtime errors
+
+                // Check lamejs library availability
+                if (typeof lamejs === 'undefined') {
+                    const lameLib = window.lamejs || window.LAME || window.lame;
+                    if (!lameLib || !lameLib.Mp3Encoder) {
+                        throw new Error('lamejs library not loaded. Please check CDN connection and ensure lame.all.js is accessible.');
+                    }
+                    // Assign to global lamejs if found under alternative name
+                    window.lamejs = lameLib;
+                }
+
+                // Check JSZip library availability
+                if (typeof JSZip === 'undefined') {
+                    throw new Error('JSZip library not loaded. Please check CDN connection.');
+                }
+
+                // REQUIRED: Log successful verification
+                console.log('All CDN libraries verified successfully');
+
+                // 🔥 MANDATORY: Test lamejs functionality before proceeding
+                try {
+                    const testEncoder = new lamejs.Mp3Encoder(1, 16000, 128);
+                    if (!testEncoder || typeof testEncoder.encodeBuffer !== 'function') {
+                        throw new Error('lamejs Mp3Encoder not functional');
+                    }
+                } catch (error) {
+                    throw new Error(`lamejs library test failed: ${error.message}`);
+                }
+
+                console.log('lamejs Mp3Encoder functionality verified');
+
                 // Configure environment for remote model loading
                 env.allowRemoteModels = true;
                 env.allowLocalModels = false;

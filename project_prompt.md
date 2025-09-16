@@ -97,7 +97,7 @@ The application must establish a bidirectional relationship between the audio pl
 
 **FR3: Click-to-Seek Functionality**
 *   When user clicks any word in transcript display, audio player must immediately seek to start time of that word
-*   Audio playback should commence automatically from the new position
+*   Audio playback should commence automatically from the selected position
 *   Implementation: Single click event listener on parent transcript `<div>` using event delegation pattern
 
 **FR4: Real-time Playback Highlighting**
@@ -165,10 +165,11 @@ The application should have four distinct states:
     *   **Waveform Player:** A visual waveform of the full audio.
     *   **Playback Controls:** Explicit **"Play" and "Stop" buttons** that control audio playback of the waveform. The "Play" button should toggle to a "Pause" state during playback.
     *   **Interactive Transcript Display:** An interactive transcript implementing all requirements from Section 2.1, where each word can be clicked to seek audio playback, with real-time highlighting during playback.
+    *   **Pause Threshold Configuration:** An editable input field allowing users to adjust the big pause threshold (default 500ms, range 100-2000ms) for structural number detection.
     *   **Action Button:** A prominent button labeled **"Find & Split Segments"**. The download components are hidden at this stage.
 *   **State 4: Segmented Results (Splitting Complete)**
     *   This state is shown after the user clicks the "Find & Split Segments" button.
-    *   The UI from State 3 remains, but is now enhanced with:
+    *   The UI from State 3 remains, but with additional components:
     *   **Interactive Transcript:** All Section 2.1 features continue to function (click-to-seek, real-time highlighting, auto-scroll)
     *   **Split Markers:** Vertical lines on the waveform at each calculated split point.
     *   **Download Component:** A list of downloadable segments and a "Download All as ZIP" button now become visible.
@@ -258,19 +259,41 @@ The application should have four distinct states:
 
 *   **Segment Splitting (Second Stage - Triggered by Button Click):**
     *   **CRITICAL - Robust Splitting Logic:** Before attempting to find and split segments, the code must validate that the `wordTimestamps` variable is a non-empty array. If the model fails to return this word-level data (resulting in undefined or an empty array), the application must not crash. Instead, it should disable the "Find & Split Segments" button and display a clear, user-friendly error message explaining that the necessary word-level timestamp data could not be generated, and that splitting is therefore not possible.
+    *   **User Configuration Interface:** Add an editable input field for pause threshold configuration:
+        ```html
+        <div class="pause-config">
+            <label for="pause-threshold">
+                Big Pause Threshold:
+                <input type="number"
+                       id="pause-threshold"
+                       value="500"
+                       min="100"
+                       max="2000"
+                       step="50"> ms
+            </label>
+        </div>
+        ```
     *   When the user clicks "Find & Split Segments":
+    *   **Updated Algorithm Strategy:** Instead of splitting AT numbers, extract phrases that FOLLOW each number:
+        *   **Input Structure:** `<intro> <small-pause> <phrase0> <pause> <One> <pause> <phrase1> <pause> <Two> <pause> <phrase2> <pause> <Three> <pause> <phrase3>`
+        *   **Output Mapping:** phrase1 → 1.mp3, phrase2 → 2.mp3, phrase3 → 3.mp3
     *   **Number Identification:** Support numbers from 1-99 in both formats:
         *   **Number Words:** `['one', 'two', 'three', ..., 'twenty', 'twenty-one', ..., 'ninety-nine']`
         *   **Digits:** `['1', '2', '3', ..., '99']`
         *   **Mixed Recognition:** The system should detect either format interchangeably (e.g., sequence could be "one", "2", "three", "4")
-    *   **Splitting Logic:**
-        *   Create comprehensive number mapping arrays for both words and digits (1-99).
-        *   Iterate through the globally stored `wordTimestamps` array.
-        *   For each word entry, normalize the `text` (trimmed, lowercased, punctuation removed) and check if it matches the next expected number in the sequence (supporting both "twenty-one" and "21" formats).
-        *   **Flexible Matching:** Handle transcription variations (e.g., "twenty one" vs "twenty-one", "1st" vs "one", etc.).
-        *   If the correct sequential number is found, store its **end timestamp** as a split point. Increment the number counter.
+    *   **Intelligent Splitting Logic with Multi-Tier Detection:**
+        *   **Primary Algorithm - Structural Number Detection:**
+            *   Calculate pause durations between all adjacent words in milliseconds
+            *   Identify sequential numbers (1, 2, 3... or one, two, three...) followed by pauses exceeding the auto-calculated threshold
+            *   Extract phrases that occur between the end of each structural number and the start of the next structural number
+            *   Validate phrase segments have minimum duration (500ms) and maximum duration (60 seconds)
+        *   **Fallback Algorithm - Sequential Number Detection:**
+            *   If insufficient structural numbers found (< 2), detect any sequential numbers regardless of pause duration
+            *   Create segments containing content between consecutive numbers
+            *   Ensure backward compatibility with various audio patterns and speaking styles
+        *   **Adaptive Matching:** Support both word forms ("one", "two") and digit forms ("1", "2") with flexible transcription variations
     *   **Audio Slicing and Encoding (Using Original Audio):**
-        *   Define audio segments by the collected timestamps. The first segment runs from time `0` to the first split point. `1.mp3` will contain audio from `0` to the end-time of "one", `2.mp3` will be from the end-time of "one" to the end-time of "two", and so on.
+        *   **NEW APPROACH:** Define audio segments as phrases AFTER structural numbers. `1.mp3` will contain audio from end-time of "one" to start-time of "two" (the phrase following "one"), `2.mp3` will contain audio from end-time of "two" to start-time of "three" (the phrase following "two"), and so on.
         *   **CRITICAL:** Use the original `AudioBuffer` extracted from WaveSurfer via `wavesurfer.getDecodedData()` for all segment creation
         *   **Timestamp Mapping:** Convert word timestamps from 16kHz transcription back to original sample rate before slicing:
             ```javascript
@@ -278,7 +301,7 @@ The application should have four distinct states:
             const scaleFactor = originalSampleRate / 16000;
             const adjustedTimestamp = transcriptionTimestamp * scaleFactor;
             ```
-        *   For each segment, create a new `AudioBuffer` by slicing the original `AudioBuffer` at the adjusted timestamps and encode it to MP3 using `lamejs`.
+        *   For each segment, create an `AudioBuffer` by slicing the original `AudioBuffer` at the adjusted timestamps and encode it to MP3 using `lamejs`.
         *   **Quality Preservation Settings:**
             *   **Detect original audio characteristics:** sample rate, channel count, and estimated quality
             *   **Dynamic MP3 bitrate:** For lossy sources (MP3, AAC, OGG), use original bitrate when available, fallback to file size estimation (capped at 320kbps maximum). For lossless sources (WAV, FLAC), use 128kbps bitrate.
@@ -288,7 +311,7 @@ The application should have four distinct states:
     *   **UI Update & Download Generation:**
         *   **Use WaveSurfer.js v7+ Regions Plugin API (Markers are deprecated).** Complete region management workflow:
             ```javascript
-            // Clear existing regions before adding new ones
+            // Clear existing regions before adding ones
             regions.clearRegions();
 
             // Add split markers as regions (ONLY after 'ready' event)
@@ -307,7 +330,7 @@ The application should have four distinct states:
             });
             ```
         *   Create blob URLs for individual MP3 downloads using lamejs encoding.
-        *   Use JSZip to bundle all segments: `const zip = new JSZip(); zip.file('1.mp3', mp3Blob1); const zipBlob = await zip.generateAsync({type: 'blob'})`.
+        *   Use JSZip to bundle all segments: `const zip = JSZip(); zip.file('1.mp3', mp3Blob1); const zipBlob = await zip.generateAsync({type: 'blob'})`.
         *   **Progressive ZIP Creation:** Add files to ZIP incrementally with progress updates to prevent UI blocking.
         *   Transition to **State 4** with visible download components.
 
@@ -333,7 +356,7 @@ The application should have four distinct states:
     *   **CRITICAL:** During `initializeApp()`, verify ALL CDN libraries are loaded BEFORE initializing any other components
     *   **Step 1:** Check `typeof lamejs !== 'undefined'` and `typeof JSZip !== 'undefined'` at the very start of initialization
     *   **Step 2:** Handle alternative global names: `window.lamejs || window.LAME || window.lame` for lamejs library
-    *   **Step 3:** Test lamejs functionality: `new lamejs.Mp3Encoder(1, 16000, 128)` to ensure it's working
+    *   **Step 3:** Test lamejs functionality: `lamejs.Mp3Encoder(1, 16000, 128)` to ensure it's working
     *   **Step 4:** Fail fast with clear error messages if any required library is missing: "lamejs library not loaded. Please check CDN connection."
     *   **Step 5:** Log successful library verification: `console.log('All CDN libraries verified successfully')`
     *   **IMPLEMENTATION REQUIREMENT:** This verification MUST complete successfully before any AI model initialization
@@ -375,7 +398,7 @@ The application should have four distinct states:
     *   Handle WebGPU unavailability with automatic CPU fallback
     *   Provide clear error messages for unsupported browser features
     *   **WaveSurfer Region Management:**
-        *   Always call `regions.clearRegions()` before adding new regions
+        *   Always call `regions.clearRegions()` before adding regions
         *   Only call `regions.addRegion()` after 'ready' event is fired
         *   Use proper cleanup with `regions.destroy()` when switching files
         *   Handle cases where regions plugin fails to initialize

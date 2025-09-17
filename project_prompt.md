@@ -106,7 +106,7 @@ The application must establish a bidirectional relationship between the audio pl
 *   When audio playback is paused, stopped, or finished, highlighting must be removed
 *   Implementation: WaveSurfer `timeupdate` event listener with efficient span finding logic
 
-**FR5: User Experience Enhancement (Auto-Scroll)**
+**FR5: Auto-Scroll Functionality**
 *   For transcripts exceeding visible container area, view must automatically scroll to keep currently highlighted word visible
 *   Implementation: `scrollIntoView({ behavior: 'smooth', block: 'center' })` on highlighted elements
 
@@ -274,27 +274,32 @@ The application should have four distinct states:
         </div>
         ```
     *   When the user clicks "Find & Split Segments":
-    *   **Updated Algorithm Strategy:** Instead of splitting AT numbers, extract phrases that FOLLOW each number:
+    *   **Audio Extraction Algorithm:** Extract phrases that follow each number:
         *   **Input Structure:** `<intro> <small-pause> <phrase0> <pause> <One> <pause> <phrase1> <pause> <Two> <pause> <phrase2> <pause> <Three> <pause> <phrase3>`
         *   **Output Mapping:** phrase1 → 1.mp3, phrase2 → 2.mp3, phrase3 → 3.mp3
-    *   **Number Identification:** Support numbers from 1-99 in both formats:
-        *   **Number Words:** `['one', 'two', 'three', ..., 'twenty', 'twenty-one', ..., 'ninety-nine']`
-        *   **Digits:** `['1', '2', '3', ..., '99']`
-        *   **Mixed Recognition:** The system should detect either format interchangeably (e.g., sequence could be "one", "2", "three", "4")
-    *   **Intelligent Splitting Logic with Multi-Tier Detection:**
-        *   **Primary Algorithm - Structural Number Detection:**
-            *   Calculate pause durations between all adjacent words in milliseconds
-            *   Identify sequential numbers (1, 2, 3... or one, two, three...) followed by pauses exceeding the auto-calculated threshold
-            *   Extract phrases that occur between the end of each structural number and the start of the next structural number
+        *   **Segments contain only the phrases after numbers, not the numbers themselves**
+    *   **Multi-Phase Algorithm:**
+        *   **Phase 1 - Adaptive Threshold Calculation:**
+            *   Analyze pause patterns around all numbers in the transcription
+            *   Calculate optimal threshold as 75% of the longest pause duration
+            *   Apply reasonable bounds (100ms - 3000ms) to prevent extreme values
+        *   **Phase 2 - Structural Number Detection:**
+            *   Identify sequential numbers (1, 2, 3... or one, two, three...) with pauses exceeding the adaptive threshold
+            *   Extract phrases between the end of each structural number and start of the next structural number
             *   Validate phrase segments have minimum duration (500ms) and maximum duration (60 seconds)
-        *   **Fallback Algorithm - Sequential Number Detection:**
+        *   **Phase 3 - Fallback Sequential Detection:**
             *   If insufficient structural numbers found (< 2), detect any sequential numbers regardless of pause duration
             *   Create segments containing content between consecutive numbers
-            *   Ensure backward compatibility with various audio patterns and speaking styles
-        *   **Adaptive Matching:** Support both word forms ("one", "two") and digit forms ("1", "2") with flexible transcription variations
+            *   Handle various audio patterns and speaking styles
+    *   **Number Recognition (1-99 range):**
+        *   **Number Words:** `['one', 'two', 'three', ..., 'twenty', 'twenty-one', ..., 'ninety-nine']`
+        *   **Digits:** `['1', '2', '3', ..., '99']`
+        *   **Ordinals:** `['1st', '2nd', '3rd', 'first', 'second', 'third']`
+        *   **Transcription Error Handling:** Common errors like "to"→"two", "for"→"four", "ate"→"eight"
+        *   **Mixed Format Support:** Handle sequences with mixed formats (e.g., "one", "2", "three", "4")
     *   **Audio Slicing and Encoding (Using Original Audio):**
-        *   **NEW APPROACH:** Define audio segments as phrases AFTER structural numbers. `1.mp3` will contain audio from end-time of "one" to start-time of "two" (the phrase following "one"), `2.mp3` will contain audio from end-time of "two" to start-time of "three" (the phrase following "two"), and so on.
-        *   **CRITICAL:** Use the original `AudioBuffer` extracted from WaveSurfer via `wavesurfer.getDecodedData()` for all segment creation
+        *   **Segment Definition:** Audio segments contain phrases after structural numbers. `1.mp3` contains audio from end-time of "one" to start-time of "two" (the phrase following "one"), `2.mp3` contains audio from end-time of "two" to start-time of "three" (the phrase following "two"), and so on.
+        *   **Audio Source:** Use the original `AudioBuffer` extracted from WaveSurfer via `wavesurfer.getDecodedData()` for all segment creation
         *   **Timestamp Mapping:** Convert word timestamps from 16kHz transcription back to original sample rate before slicing:
             ```javascript
             const originalSampleRate = originalBuffer.sampleRate;
@@ -350,6 +355,91 @@ The application should have four distinct states:
     }
     ```
 *   **Error Recovery:** Provide clear instructions in error messages on how user can proceed or retry
+
+### **7.1. Robust Timestamp Handling Requirements**
+
+**🔥 CRITICAL: Timestamp Validation & Sanitization**
+
+The system MUST validate all timestamps from transcription models and automatically correct invalid ranges where start >= end. This prevents runtime crashes during audio segmentation.
+
+**Functional Requirements:**
+
+1. **Timestamp Validation During Generation**: Validate timestamps as they are created during transcription processing:
+   ```javascript
+   // REQUIRED: Validate timestamp before adding to wordTimestamps array
+   if (adjustedEnd > adjustedStart) {
+       wordTimestamps.push({
+           text: chunk.text.trim(),
+           start: adjustedStart,
+           end: adjustedEnd
+       });
+   } else if (adjustedStart === adjustedEnd) {
+       // Handle zero-duration words by adding minimal duration
+       wordTimestamps.push({
+           text: chunk.text.trim(),
+           start: adjustedStart,
+           end: adjustedStart + 0.001 // 1ms minimum duration
+       });
+   } else {
+       // Skip invalid timestamps where start > end
+       console.warn(`Skipping invalid timestamp: ${chunk.text} [${adjustedStart}, ${adjustedEnd}]`);
+   }
+   ```
+
+2. **Enhanced Validation Function**: The AudioSegmentExtractor validateInput method MUST correct invalid timestamps instead of throwing errors:
+   ```javascript
+   validateInput(words) {
+       if (!Array.isArray(words) || words.length === 0) {
+           throw new Error('Invalid transcription data: must be non-empty array');
+       }
+
+       const validWords = words.filter((word, index) => {
+           // Normalize timestamp format
+           if (word.timestamp && Array.isArray(word.timestamp)) {
+               word.start = word.timestamp[0];
+               word.end = word.timestamp[1];
+           }
+
+           if (word.start >= word.end) {
+               console.warn(`Correcting invalid timestamp at index ${index}: ${word.text} [${word.start}, ${word.end}]`);
+               if (word.start === word.end) {
+                   word.end = word.start + 0.001; // Add 1ms duration
+                   return true; // Keep corrected word
+               } else {
+                   // Remove words with severely invalid timestamps
+                   console.warn(`Removing word with invalid timestamp: ${word.text}`);
+                   return false; // Filter out this word
+               }
+           }
+           return true; // Keep valid words
+       });
+
+       return validWords;
+   }
+   ```
+
+3. **Edge Case Handling**: The system MUST gracefully handle transcription edge cases including:
+   - Zero-duration words (start == end) → Add 1ms minimum duration
+   - Negative duration words (start > end) → Remove from processing
+   - Overlapping speech segments → Log warnings but continue processing
+   - Model artifacts and precision errors → Apply defensive validation
+
+4. **Fallback Mechanisms**: When automatic timestamp correction fails, the system MUST:
+   - Provide meaningful error messages to users
+   - Continue processing with remaining valid words
+   - Log detailed information for debugging
+
+5. **Quality Assurance**: The system MUST include comprehensive validation for:
+   - Timestamp chronological ordering within segments
+   - Minimum segment duration thresholds (1ms minimum)
+   - Audio duration boundary checks
+   - Word count validation after filtering
+
+6. **Error Recovery**: Failed timestamp validation MUST NOT crash the application but instead:
+   - Log specific validation issues with word details
+   - Filter out problematic words automatically
+   - Provide actionable feedback if too many words are filtered
+   - Continue segmentation with remaining valid words
 
 **Required Error Handling:**
 *   **🔥 MANDATORY: Initialization Phase Library Verification:**
@@ -478,6 +568,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
     - ✅ Transcription completes with word count: "Transcription complete: X words processed"
     - ✅ Segmentation succeeds: "Found X numbers in sequence" and "Created X audio segments"
     - ✅ Download buttons appear for each segment plus ZIP download
+    - ✅ **For 1.mp3 reference file**: Should create exactly 6 download buttons (segments 1.mp3 through 6.mp3)
 
 *   **Acceptable Warnings (Non-Critical):**
     - ONNX runtime optimization warnings about execution providers
@@ -488,6 +579,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
     - Audio file should contain spoken numbers in sequence (e.g., "one, two, three, four, five, six")
     - Duration: 60-120 seconds for reasonable test time
     - Format: MP3 or WAV with clear speech
+    - **Reference file**: `1.mp3` contains spoken numbers "1, 2, 3, 4, 5, 6" and should extract 6 audio segments
 
 ### **9. Implementation Structure**
 
@@ -626,7 +718,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
 </html>
 ```
 
-**Key Improvements:**
+**Key Features:**
 - **No conflicting script loading approaches** - uses CDN for globals, ES modules for modern libraries
 - **Latest verified library versions** with specific version numbers for stability
 - **Modern API usage** - Regions instead of deprecated Markers, WebGPU acceleration with CPU fallback

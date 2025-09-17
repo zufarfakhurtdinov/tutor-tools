@@ -384,14 +384,15 @@
                         </button>
                         <div class="pause-config" style="margin-bottom: 15px;">
                             <label for="pause-threshold">
-                                Big Pause Threshold:
+                                Pause Threshold (Auto-calculated):
                                 <input type="number"
                                        id="pause-threshold"
                                        value="500"
                                        min="100"
                                        max="2000"
                                        step="50"
-                                       style="width: 80px; margin: 0 5px;"> ms
+                                       style="width: 80px; margin: 0 5px;"
+                                       title="This value is automatically calculated as 75% of the longest pause around numbers. You can override it manually."> ms
                             </label>
                         </div>
                         <button id="splitBtn" class="btn btn-primary">
@@ -805,11 +806,24 @@
                                 const adjustedStart = chunk.timestamp[0] + startTime;
                                 const adjustedEnd = chunk.timestamp[1] + startTime;
 
-                                wordTimestamps.push({
-                                    text: chunk.text.trim(),
-                                    start: adjustedStart,
-                                    end: adjustedEnd
-                                });
+                                // CRITICAL: Validate timestamp before adding to array
+                                if (adjustedEnd > adjustedStart) {
+                                    wordTimestamps.push({
+                                        text: chunk.text.trim(),
+                                        start: adjustedStart,
+                                        end: adjustedEnd
+                                    });
+                                } else if (adjustedStart === adjustedEnd) {
+                                    // Handle zero-duration words by adding minimal duration
+                                    wordTimestamps.push({
+                                        text: chunk.text.trim(),
+                                        start: adjustedStart,
+                                        end: adjustedStart + 0.001 // 1ms minimum duration
+                                    });
+                                } else {
+                                    // Skip invalid timestamps where start > end
+                                    console.warn(`Skipping invalid timestamp: ${chunk.text.trim()} [${adjustedStart}, ${adjustedEnd}]`);
+                                }
                             }
                         }
                     }
@@ -1065,16 +1079,34 @@
 
                 updateProgress(0, 'Analyzing transcript for numbers...');
 
-                // Find phrase segments using pause analysis
-                const phraseSegments = findNumberSequence(wordTimestamps);
+                // Use AudioSegmentExtractor for advanced number detection and segmentation
+                const extractor = new AudioSegmentExtractor(wordTimestamps, {
+                    pauseThreshold: parseInt(document.getElementById('pause-threshold').value) || 500,
+                    debug: true
+                });
 
-                if (phraseSegments.length < 2) {
-                    showError('Could not find a sequence of at least 2 consecutive numbers with sufficient pause separation. Please ensure your audio contains spoken numbers like "one, two, three" or "1, 2, 3" followed by phrases.');
+                const extractedSegments = extractor.extractAudioSegments();
+
+                // Update UI with the adaptive threshold that was calculated
+                const adaptiveThreshold = extractor.config.pauseThreshold;
+                document.getElementById('pause-threshold').value = Math.round(adaptiveThreshold);
+
+                if (extractedSegments.length < 1) {
+                    showError('Could not find a sequence of at least 1 consecutive number. Please ensure your audio contains spoken numbers like "one, two, three" or "1, 2, 3" followed by phrases.');
                     resetSplitButton();
                     return;
                 }
 
-                console.log(`Found ${phraseSegments.length} phrase segments:`, phraseSegments.map(p => `${p.number} (${(p.durationMs/1000).toFixed(1)}s)`));
+                console.log(`Found ${extractedSegments.length} extracted segments:`, extractedSegments.map(s => `${s.numberValue}: ${s.segmentBoundaries.duration.toFixed(1)}s`));
+
+                // Convert extracted segments to format expected by createAudioSegments
+                const phraseSegments = extractedSegments.map(segment => ({
+                    number: segment.numberValue,
+                    startTime: segment.segmentBoundaries.start,
+                    endTime: segment.segmentBoundaries.end,
+                    durationMs: segment.segmentBoundaries.duration * 1000,
+                    timestamp: segment.segmentBoundaries.end // For visual markers
+                }));
 
                 // Store phrase segments for audio creation
                 splitTimestamps = phraseSegments;
@@ -1111,263 +1143,390 @@
             }
         }
 
-        // Pause calculation functions (milliseconds)
-        function calculatePauseAfterMs(wordTimestamps, index) {
-            if (index >= wordTimestamps.length - 1) return 0;
-            const currentEnd = wordTimestamps[index].end;
-            const nextStart = wordTimestamps[index + 1].start;
-            return (nextStart - currentEnd) * 1000; // Convert to milliseconds
-        }
-
-        function calculatePauseBeforeMs(wordTimestamps, index) {
-            if (index <= 0) return 0;
-            const previousEnd = wordTimestamps[index - 1].end;
-            const currentStart = wordTimestamps[index].start;
-            return (currentStart - previousEnd) * 1000; // Convert to milliseconds
-        }
-
-        // Analyze all pauses in audio to determine optimal threshold
-        function analyzeAudioPauses(words) {
-            const allPauses = [];
-
-            for (let i = 0; i < words.length - 1; i++) {
-                const pauseMs = calculatePauseAfterMs(words, i);
-                if (pauseMs > 0) {
-                    allPauses.push(pauseMs);
-                }
+        // Audio Segment Extractor Class - Integrated Implementation
+        class AudioSegmentExtractor {
+            constructor(transcriptionWords, options = {}) {
+                this.words = this.validateInput(transcriptionWords);
+                this.config = {
+                    pauseThreshold: options.pauseThreshold || 500,
+                    minSegmentDuration: options.minSegmentDuration || 500,
+                    maxSegmentDuration: options.maxSegmentDuration || 60000,
+                    preferLaterOccurrences: options.preferLater !== false,
+                    debugMode: options.debug || true // Enable debug for web app
+                };
+                this.debugLog('AudioSegmentExtractor initialized with config:', this.config);
             }
 
-            // Sort pauses in descending order
-            allPauses.sort((a, b) => b - a);
+            extractAudioSegments() {
+                try {
+                    // Phase 1: Adaptive Threshold Calculation
+                    const adaptiveThreshold = this.calculateAdaptiveThreshold();
+                    this.debugLog(`Calculated adaptive threshold: ${adaptiveThreshold.toFixed(0)}ms`);
 
-            console.log(`Analyzed ${allPauses.length} pauses. Top 5 longest:`, allPauses.slice(0, 5));
+                    // Update config with calculated threshold
+                    const originalThreshold = this.config.pauseThreshold;
+                    this.config.pauseThreshold = adaptiveThreshold;
 
-            // Get 3rd longest pause and use 90% of it as threshold
-            let autoThreshold = 500; // Default fallback
-            if (allPauses.length >= 3) {
-                autoThreshold = Math.round(allPauses[2] * 0.9);
-            } else if (allPauses.length >= 1) {
-                autoThreshold = Math.round(allPauses[0] * 0.5); // Use 50% of longest if < 3 pauses
-            }
+                    // Phase 2: Structural Number Detection
+                    let structuralNumbers = this.findStructuralNumbers();
+                    this.debugLog(`Found ${structuralNumbers.length} structural numbers with adaptive threshold`);
 
-            console.log(`Auto-calculated threshold: ${autoThreshold}ms (from 3rd longest pause)`);
-
-            // Update the UI input field with calculated value
-            document.getElementById('pause-threshold').value = autoThreshold;
-
-            return autoThreshold;
-        }
-
-        function findNumberSequence(words) {
-            // Number mappings for 1-99
-            const numberWords = {
-                'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-                'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
-                'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15,
-                'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20,
-                'twenty-one': 21, 'twenty-two': 22, 'twenty-three': 23, 'twenty-four': 24, 'twenty-five': 25,
-                'twenty-six': 26, 'twenty-seven': 27, 'twenty-eight': 28, 'twenty-nine': 29, 'thirty': 30,
-                'thirty-one': 31, 'thirty-two': 32, 'thirty-three': 33, 'thirty-four': 34, 'thirty-five': 35,
-                'thirty-six': 36, 'thirty-seven': 37, 'thirty-eight': 38, 'thirty-nine': 39, 'forty': 40,
-                'forty-one': 41, 'forty-two': 42, 'forty-three': 43, 'forty-four': 44, 'forty-five': 45,
-                'forty-six': 46, 'forty-seven': 47, 'forty-eight': 48, 'forty-nine': 49, 'fifty': 50,
-                'fifty-one': 51, 'fifty-two': 52, 'fifty-three': 53, 'fifty-four': 54, 'fifty-five': 55,
-                'fifty-six': 56, 'fifty-seven': 57, 'fifty-eight': 58, 'fifty-nine': 59, 'sixty': 60,
-                'sixty-one': 61, 'sixty-two': 62, 'sixty-three': 63, 'sixty-four': 64, 'sixty-five': 65,
-                'sixty-six': 66, 'sixty-seven': 67, 'sixty-eight': 68, 'sixty-nine': 69, 'seventy': 70,
-                'seventy-one': 71, 'seventy-two': 72, 'seventy-three': 73, 'seventy-four': 74, 'seventy-five': 75,
-                'seventy-six': 76, 'seventy-seven': 77, 'seventy-eight': 78, 'seventy-nine': 79, 'eighty': 80,
-                'eighty-one': 81, 'eighty-two': 82, 'eighty-three': 83, 'eighty-four': 84, 'eighty-five': 85,
-                'eighty-six': 86, 'eighty-seven': 87, 'eighty-eight': 88, 'eighty-nine': 89, 'ninety': 90,
-                'ninety-one': 91, 'ninety-two': 92, 'ninety-three': 93, 'ninety-four': 94, 'ninety-five': 95,
-                'ninety-six': 96, 'ninety-seven': 97, 'ninety-eight': 98, 'ninety-nine': 99
-            };
-
-            // Auto-calculate optimal threshold from audio pauses
-            const bigPauseThreshold = analyzeAudioPauses(words);
-            console.log(`Using auto-calculated pause threshold: ${bigPauseThreshold}ms`);
-
-            const structuralNumbers = [];
-            let expectedNumber = 1;
-
-            // Step 1: Identify structural numbers with pause analysis
-            for (let i = 0; i < words.length; i++) {
-                const word = words[i];
-
-                // Normalize word text
-                const normalizedText = word.text.toLowerCase()
-                    .replace(/[.,!?;:"']/g, '') // Remove punctuation
-                    .replace(/\s+/g, ' ') // Normalize whitespace
-                    .trim();
-
-                // Check for number match (both word and digit forms)
-                let matchedNumber = null;
-
-                // Check word form
-                if (numberWords[normalizedText] === expectedNumber) {
-                    matchedNumber = expectedNumber;
-                }
-                // Check digit form
-                else if (parseInt(normalizedText) === expectedNumber) {
-                    matchedNumber = expectedNumber;
-                }
-                // Check variations (e.g., "twenty one" vs "twenty-one")
-                else {
-                    const spacedVersion = normalizedText.replace('-', ' ');
-                    if (numberWords[spacedVersion] === expectedNumber) {
-                        matchedNumber = expectedNumber;
-                    }
-                }
-
-                if (matchedNumber) {
-                    const pauseAfterMs = calculatePauseAfterMs(words, i);
-                    const pauseBeforeMs = calculatePauseBeforeMs(words, i);
-
-                    console.log(`Number "${normalizedText}" at index ${i}: pauseBefore=${pauseBeforeMs}ms, pauseAfter=${pauseAfterMs}ms`);
-
-                    // Structural number criteria: pause after >= auto-calculated threshold
-                    if (pauseAfterMs >= bigPauseThreshold && pauseBeforeMs >= 100) {
-                        structuralNumbers.push({
-                            number: matchedNumber,
-                            endTime: word.end,
-                            index: i,
-                            pauseAfterMs: pauseAfterMs
-                        });
-                        console.log(`✓ Structural number detected: "${normalizedText}" with ${pauseAfterMs}ms pause`);
-                        expectedNumber++;
-                    }
-                }
-            }
-
-            // Step 2: Extract phrases between structural numbers
-            const phraseSegments = [];
-            for (let i = 0; i < structuralNumbers.length - 1; i++) {
-                const currentNumberEnd = structuralNumbers[i].endTime;
-                const nextNumberStart = findWordStartTime(words, structuralNumbers[i + 1].index);
-                const phraseDurationMs = (nextNumberStart - currentNumberEnd) * 1000;
-
-                // Validate phrase duration (min 0.5s, max 60s)
-                if (phraseDurationMs >= 500 && phraseDurationMs <= 60000) {
-                    phraseSegments.push({
-                        number: structuralNumbers[i].number,
-                        timestamp: nextNumberStart,
-                        startTime: currentNumberEnd,
-                        endTime: nextNumberStart,
-                        durationMs: phraseDurationMs
-                    });
-                }
-            }
-
-            // Handle last phrase
-            if (structuralNumbers.length > 0) {
-                const lastNumber = structuralNumbers[structuralNumbers.length - 1];
-                const lastPhraseStart = lastNumber.endTime;
-                const lastPhraseEnd = words[words.length - 1].end;
-                const lastPhraseDurationMs = (lastPhraseEnd - lastPhraseStart) * 1000;
-
-                if (lastPhraseDurationMs >= 500) {
-                    phraseSegments.push({
-                        number: lastNumber.number,
-                        timestamp: lastPhraseEnd,
-                        startTime: lastPhraseStart,
-                        endTime: lastPhraseEnd,
-                        durationMs: lastPhraseDurationMs
-                    });
-                }
-            }
-
-            console.log(`Found ${phraseSegments.length} phrase segments with auto-calculated ${bigPauseThreshold}ms threshold`);
-
-            // Debug: if no segments found, try to find ANY sequential numbers regardless of pauses
-            if (phraseSegments.length < 2) {
-                console.log('Debug: Looking for any sequential numbers (ignoring pauses):');
-                const allNumbers = [];
-                let expectedNumber = 1;
-
-                for (let i = 0; i < words.length; i++) {
-                    const word = words[i];
-                    const normalizedText = word.text.toLowerCase()
-                        .replace(/[.,!?;:"']/g, '')
-                        .replace(/\s+/g, ' ')
-                        .trim();
-
-                    let matchedNumber = null;
-                    if (numberWords[normalizedText] === expectedNumber) {
-                        matchedNumber = expectedNumber;
-                    } else if (parseInt(normalizedText) === expectedNumber) {
-                        matchedNumber = expectedNumber;
-                    } else {
-                        const spacedVersion = normalizedText.replace('-', ' ');
-                        if (numberWords[spacedVersion] === expectedNumber) {
-                            matchedNumber = expectedNumber;
-                        }
+                    // Phase 3: Fallback Algorithm - Sequential Number Detection
+                    if (structuralNumbers.length < 2) {
+                        this.debugLog('Insufficient structural numbers, using fallback detection');
+                        structuralNumbers = this.findSequentialNumbers();
                     }
 
-                    if (matchedNumber) {
-                        allNumbers.push({
-                            number: matchedNumber,
-                            word: normalizedText,
-                            index: i,
-                            startTime: word.start,
-                            endTime: word.end,
-                            pauseAfter: calculatePauseAfterMs(words, i)
-                        });
-                        expectedNumber++;
-                    }
-                }
-
-                console.log(`Debug: Found ${allNumbers.length} sequential numbers:`,
-                    allNumbers.map(n => `${n.number}:"${n.word}"@${n.index}(pause:${n.pauseAfter}ms)`));
-
-                // If we found sequential numbers, create segments from them even with small pauses
-                if (allNumbers.length >= 2) {
-                    const segments = [];
-                    for (let i = 0; i < allNumbers.length - 1; i++) {
-                        const start = allNumbers[i].endTime;
-                        const end = allNumbers[i + 1].startTime;
-                        const durationMs = (end - start) * 1000;
-
-                        if (durationMs > 0) {
-                            segments.push({
-                                number: allNumbers[i].number,
-                                timestamp: end,
-                                startTime: start,
-                                endTime: end,
-                                durationMs: durationMs
-                            });
-                        }
+                    if (structuralNumbers.length === 0) {
+                        throw new Error('No sequential numbers found in transcription');
                     }
 
-                    // Add last segment
-                    if (allNumbers.length > 0) {
-                        const lastNum = allNumbers[allNumbers.length - 1];
-                        const start = lastNum.endTime;
-                        const end = words[words.length - 1].end;
-                        const durationMs = (end - start) * 1000;
+                    // Phase 4: Segment Creation
+                    const segments = this.createExtractionSegments(structuralNumbers);
+                    this.validateSegments(segments);
 
-                        if (durationMs > 0) {
-                            segments.push({
-                                number: lastNum.number,
-                                timestamp: end,
-                                startTime: start,
-                                endTime: end,
-                                durationMs: durationMs
-                            });
-                        }
-                    }
+                    // Restore original threshold in config
+                    this.config.pauseThreshold = originalThreshold;
 
-                    console.log(`Created ${segments.length} fallback segments from any sequential numbers`);
                     return segments;
+                } catch (error) {
+                    this.debugLog('Extraction failed:', error.message);
+                    throw error;
                 }
             }
 
-            return phraseSegments;
+            validateInput(words) {
+                if (!Array.isArray(words) || words.length === 0) {
+                    throw new Error('Invalid transcription data: must be non-empty array');
+                }
+
+                const validWords = words.filter((word, index) => {
+                    if (!word.text || (!word.timestamp && (typeof word.start !== 'number' || typeof word.end !== 'number'))) {
+                        console.warn(`Removing word at index ${index}: missing text or timestamp`);
+                        return false;
+                    }
+
+                    // Normalize timestamp format
+                    if (word.timestamp && Array.isArray(word.timestamp)) {
+                        word.start = word.timestamp[0];
+                        word.end = word.timestamp[1];
+                    }
+
+                    if (word.start >= word.end) {
+                        console.warn(`Correcting invalid timestamp at index ${index}: ${word.text} [${word.start}, ${word.end}]`);
+                        if (word.start === word.end) {
+                            word.end = word.start + 0.001; // Add 1ms duration
+                            return true; // Keep corrected word
+                        } else {
+                            // Remove words with severely invalid timestamps
+                            console.warn(`Removing word with invalid timestamp: ${word.text}`);
+                            return false; // Filter out this word
+                        }
+                    }
+                    return true; // Keep valid words
+                });
+
+                if (validWords.length === 0) {
+                    throw new Error('No valid words found after timestamp validation');
+                }
+
+                if (validWords.length < words.length) {
+                    console.log(`Filtered ${words.length - validWords.length} invalid words, ${validWords.length} words remaining`);
+                }
+
+                return validWords;
+            }
+
+            calculateAdaptiveThreshold() {
+                this.debugLog('=== Adaptive Threshold Calculation Phase ===');
+
+                const numberPauseData = this.analyzeAllNumberPauses();
+
+                if (numberPauseData.length === 0) {
+                    this.debugLog('No numbers found for threshold calculation, using default 500ms');
+                    return 500;
+                }
+
+                const allPauses = [];
+                numberPauseData.forEach(data => {
+                    allPauses.push(data.pauseAnalysis.beforeNumber);
+                    allPauses.push(data.pauseAnalysis.afterNumber);
+                });
+
+                const nonZeroPauses = allPauses.filter(pause => pause > 0).sort((a, b) => b - a);
+
+                if (nonZeroPauses.length === 0) {
+                    this.debugLog('No significant pauses found, using default 500ms');
+                    return 500;
+                }
+
+                const longestPause = nonZeroPauses[0];
+                const calculatedThreshold = longestPause * 0.75 * 1000;
+
+                const boundedThreshold = Math.max(100, Math.min(3000, calculatedThreshold));
+
+                this.debugLog(`Pause analysis:`, {
+                    numbersFound: numberPauseData.length,
+                    allPauses: nonZeroPauses.map(p => `${(p * 1000).toFixed(0)}ms`),
+                    longestPause: `${(longestPause * 1000).toFixed(0)}ms`,
+                    calculated75Percent: `${calculatedThreshold.toFixed(0)}ms`,
+                    finalThreshold: `${boundedThreshold.toFixed(0)}ms`
+                });
+
+                return boundedThreshold;
+            }
+
+            analyzeAllNumberPauses() {
+                const numberPauseData = [];
+
+                this.words.forEach((word, index) => {
+                    if (this.isNumber(word.text)) {
+                        const pauseAnalysis = this.analyzePauses(index);
+
+                        numberPauseData.push({
+                            numberValue: this.parseNumber(word.text),
+                            numberText: word.text,
+                            wordIndex: index,
+                            numberWordTiming: {
+                                start: word.start,
+                                end: word.end
+                            },
+                            pauseAnalysis: pauseAnalysis
+                        });
+                    }
+                });
+
+                return numberPauseData;
+            }
+
+            findStructuralNumbers() {
+                const candidates = [];
+                const pauseThresholdSeconds = this.config.pauseThreshold / 1000;
+
+                this.words.forEach((word, index) => {
+                    if (this.isNumber(word.text)) {
+                        const pauseAnalysis = this.analyzePauses(index);
+
+                        if (pauseAnalysis.afterNumber >= pauseThresholdSeconds) {
+                            candidates.push({
+                                numberValue: this.parseNumber(word.text),
+                                numberText: word.text,
+                                wordIndex: index,
+                                numberWordTiming: {
+                                    start: word.start,
+                                    end: word.end
+                                },
+                                pauseAnalysis: pauseAnalysis,
+                                isStructural: true
+                            });
+                        }
+                    }
+                });
+
+                return this.selectSequentialNumbers(candidates);
+            }
+
+            findSequentialNumbers() {
+                const allNumbers = [];
+
+                this.words.forEach((word, index) => {
+                    if (this.isNumber(word.text)) {
+                        const pauseAnalysis = this.analyzePauses(index);
+
+                        allNumbers.push({
+                            numberValue: this.parseNumber(word.text),
+                            numberText: word.text,
+                            wordIndex: index,
+                            numberWordTiming: {
+                                start: word.start,
+                                end: word.end
+                            },
+                            pauseAnalysis: pauseAnalysis,
+                            isStructural: false
+                        });
+                    }
+                });
+
+                return this.selectSequentialNumbers(allNumbers);
+            }
+
+            selectSequentialNumbers(candidates) {
+                const groupedByNumber = {};
+                candidates.forEach(candidate => {
+                    const num = candidate.numberValue;
+                    if (!groupedByNumber[num]) {
+                        groupedByNumber[num] = [];
+                    }
+                    groupedByNumber[num].push(candidate);
+                });
+
+                const selectedNumbers = {};
+                Object.keys(groupedByNumber).forEach(number => {
+                    const candidatesForNumber = groupedByNumber[number];
+
+                    candidatesForNumber.sort((a, b) => {
+                        if (a.isStructural !== b.isStructural) {
+                            return b.isStructural - a.isStructural;
+                        }
+                        const pauseDiff = Math.abs(a.pauseAnalysis.totalDuration - b.pauseAnalysis.totalDuration);
+                        if (pauseDiff > 0.1) {
+                            return b.pauseAnalysis.totalDuration - a.pauseAnalysis.totalDuration;
+                        }
+                        return b.wordIndex - a.wordIndex;
+                    });
+
+                    selectedNumbers[number] = candidatesForNumber[0];
+                });
+
+                const sequential = [];
+                for (let i = 1; i <= 99; i++) {
+                    if (selectedNumbers[i]) {
+                        sequential.push(selectedNumbers[i]);
+                    } else {
+                        break;
+                    }
+                }
+
+                this.debugLog(`Selected ${sequential.length} sequential numbers:`, sequential.map(n => n.numberValue));
+                return sequential;
+            }
+
+            createExtractionSegments(sequentialNumbers) {
+                const segments = [];
+
+                sequentialNumbers.forEach((numberData, index) => {
+                    const phraseStart = numberData.numberWordTiming.end + numberData.pauseAnalysis.afterNumber;
+
+                    let phraseEnd;
+                    if (index < sequentialNumbers.length - 1) {
+                        const nextNumber = sequentialNumbers[index + 1];
+                        phraseEnd = nextNumber.numberWordTiming.start - nextNumber.pauseAnalysis.beforeNumber;
+                    } else {
+                        phraseEnd = this.words[this.words.length - 1].end;
+                    }
+
+                    const duration = phraseEnd - phraseStart;
+
+                    segments.push({
+                        numberValue: numberData.numberValue,
+                        outputFile: `${numberData.numberValue}.mp3`,
+                        segmentBoundaries: {
+                            start: phraseStart,
+                            end: phraseEnd,
+                            duration: duration
+                        },
+                        sourceNumber: {
+                            text: numberData.numberText,
+                            wordIndex: numberData.wordIndex,
+                            timing: numberData.numberWordTiming,
+                            pauses: numberData.pauseAnalysis,
+                            isStructural: numberData.isStructural
+                        }
+                    });
+                });
+
+                return segments;
+            }
+
+            analyzePauses(index) {
+                const beforeNumber = this.calculatePauseBefore(index);
+                const afterNumber = this.calculatePauseAfter(index);
+
+                return {
+                    beforeNumber: beforeNumber,
+                    afterNumber: afterNumber,
+                    totalDuration: beforeNumber + afterNumber
+                };
+            }
+
+            calculatePauseBefore(index) {
+                if (index === 0) return 0;
+                const currentStart = this.words[index].start;
+                const previousEnd = this.words[index - 1].end;
+                return Math.max(0, currentStart - previousEnd);
+            }
+
+            calculatePauseAfter(index) {
+                if (index >= this.words.length - 1) return 0;
+                const currentEnd = this.words[index].end;
+                const nextStart = this.words[index + 1].start;
+                return Math.max(0, nextStart - currentEnd);
+            }
+
+            validateSegments(segments) {
+                segments.forEach(segment => {
+                    const duration = segment.segmentBoundaries.duration;
+
+                    if (duration < this.config.minSegmentDuration / 1000) {
+                        this.debugLog(`Warning: Segment ${segment.numberValue} too short: ${duration.toFixed(2)}s`);
+                    }
+
+                    if (duration > this.config.maxSegmentDuration / 1000) {
+                        this.debugLog(`Warning: Segment ${segment.numberValue} too long: ${duration.toFixed(2)}s`);
+                    }
+                });
+            }
+
+            isNumber(text) {
+                if (/^\d{1,2}$/.test(text)) {
+                    const num = parseInt(text);
+                    return num >= 1 && num <= 99;
+                }
+
+                if (/^\d{1,2}(st|nd|rd|th)$/i.test(text)) {
+                    const num = parseInt(text);
+                    return num >= 1 && num <= 99;
+                }
+
+                return this.getNumberMap().hasOwnProperty(text.toLowerCase());
+            }
+
+            parseNumber(text) {
+                const digitMatch = text.match(/^(\d{1,2})(st|nd|rd|th)?$/i);
+                if (digitMatch) {
+                    const num = parseInt(digitMatch[1]);
+                    return (num >= 1 && num <= 99) ? num : 0;
+                }
+
+                return this.getNumberMap()[text.toLowerCase()] || 0;
+            }
+
+            getNumberMap() {
+                if (!this._numberMap) {
+                    this._numberMap = {
+                        'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+                        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+                        'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15,
+                        'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19,
+                        'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50,
+                        'sixty': 60, 'seventy': 70, 'eighty': 80, 'ninety': 90,
+                        'first': 1, 'second': 2, 'third': 3, 'fourth': 4, 'fifth': 5,
+                        'sixth': 6, 'seventh': 7, 'eighth': 8, 'ninth': 9, 'tenth': 10,
+                        'to': 2, 'too': 2, 'for': 4, 'fore': 4, 'ate': 8
+                    };
+
+                    const tens = ['twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+                    const ones = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+
+                    tens.forEach((ten, tenIndex) => {
+                        ones.forEach((one, oneIndex) => {
+                            const value = (tenIndex + 2) * 10 + (oneIndex + 1);
+                            this._numberMap[`${ten}-${one}`] = value;
+                            this._numberMap[`${ten} ${one}`] = value;
+                        });
+                    });
+                }
+
+                return this._numberMap;
+            }
+
+            debugLog(...args) {
+                if (this.config.debugMode) {
+                    console.log('[AudioSegmentExtractor]', ...args);
+                }
+            }
         }
 
-        function findWordStartTime(words, index) {
-            if (index < 0 || index >= words.length) return 0;
-            return words[index].start;
-        }
 
         async function createAudioSegments() {
             audioSegments = [];

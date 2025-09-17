@@ -192,6 +192,12 @@ async function testAudioWorkflow() {
             throw new Error('No download buttons found after segmentation');
         }
 
+        // Verify expected number of segments for 1.mp3 (contains "1, 2, 3, 4, 5, 6")
+        if (downloadButtons !== 6) {
+            console.log(`⚠️ Expected 6 download buttons for 1.mp3 file, found ${downloadButtons}`);
+            console.log(`   This may indicate issues with number detection or segmentation algorithm`);
+        }
+
         // Check that ZIP download button is available
         const zipButton = page.locator('button:has-text("Download All as ZIP")');
         await zipButton.waitFor({ state: 'visible', timeout: 5000 });

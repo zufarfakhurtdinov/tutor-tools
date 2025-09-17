@@ -471,6 +471,7 @@ The system MUST validate all timestamps from transcription models and automatica
     *   Handle ordinal numbers (e.g., "1st", "2nd", "first", "second")
     *   Normalize compound numbers (e.g., "twenty one" → "twenty-one" → "21")
     *   Handle transcription errors (e.g., "to" instead of "two", "for" instead of "four")
+    *   **🔥 CRITICAL: Handle punctuation in transcribed words** - Strip punctuation before number detection (e.g., "Three.", "Four.", "Five." → "three", "four", "five"). The transcription model often adds punctuation to spoken numbers, which must be removed in both `isNumber()` and `parseNumber()` functions using `text.replace(/[^\w]/g, '')` before processing.
     *   Provide fallback message when no sequential numbers are detected (minimum 2 consecutive numbers required)
     *   Handle partial number sequences up to 99 (e.g., sequence from "one" to "fifty-seven")
 *   **Library Loading & CDN Issues:**
@@ -569,6 +570,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
     - ✅ Segmentation succeeds: "Found X numbers in sequence" and "Created X audio segments"
     - ✅ Download buttons appear for each segment plus ZIP download
     - ✅ **For 1.mp3 reference file**: Should create exactly 6 download buttons (segments 1.mp3 through 6.mp3)
+    - ✅ **Punctuation handling verified**: Algorithm correctly processes transcribed words with punctuation like "Three.", "Four.", "Five.", "Six."
 
 *   **Acceptable Warnings (Non-Critical):**
     - ONNX runtime optimization warnings about execution providers

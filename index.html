@@ -838,6 +838,8 @@
                 updateProgress(95, 'Finalizing transcription...');
 
                 console.log(`Transcription complete: ${wordTimestamps.length} words processed`);
+                // Debug: Log first 20 words to see what's being transcribed
+                console.log('First 20 transcribed words:', wordTimestamps.slice(0, 20).map(w => w.text));
 
                 if (wordTimestamps.length === 0) {
                     throw new Error('No words were transcribed from the audio. Please check that the audio contains clear speech.');
@@ -1328,12 +1330,13 @@
 
             findSequentialNumbers() {
                 const allNumbers = [];
+                this.debugLog('=== Finding All Numbers in Transcription ===');
+                this.debugLog(`Examining ${this.words.length} transcribed words`);
 
                 this.words.forEach((word, index) => {
                     if (this.isNumber(word.text)) {
                         const pauseAnalysis = this.analyzePauses(index);
-
-                        allNumbers.push({
+                        const numberData = {
                             numberValue: this.parseNumber(word.text),
                             numberText: word.text,
                             wordIndex: index,
@@ -1343,9 +1346,21 @@
                             },
                             pauseAnalysis: pauseAnalysis,
                             isStructural: false
-                        });
+                        };
+                        allNumbers.push(numberData);
+                        this.debugLog(`Found number: "${word.text}" -> ${numberData.numberValue} at ${word.start.toFixed(1)}s (word ${index})`);
+                    } else {
+                        // Log words that might be numbers but aren't being detected
+                        const wordText = word.text.toLowerCase();
+                        if (wordText.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|1|2|3|4|5|6|7|8|9)\b/) ||
+                            wordText.match(/\b(to|too|for|tree|free|fore|sick|sex)\b/)) {
+                            this.debugLog(`Potential number word NOT detected: "${word.text}" at ${word.start.toFixed(1)}s (word ${index})`);
+                        }
                     }
                 });
+
+                this.debugLog(`Total numbers detected: ${allNumbers.length}`);
+                this.debugLog('Numbers by value:', allNumbers.map(n => `${n.numberValue}(${n.numberText})`).join(', '));
 
                 return this.selectSequentialNumbers(allNumbers);
             }
@@ -1378,13 +1393,47 @@
                     selectedNumbers[number] = candidatesForNumber[0];
                 });
 
+                // Find the longest sequence starting from 1, allowing for some gaps
                 const sequential = [];
+                const availableNumbers = Object.keys(selectedNumbers).map(n => parseInt(n)).sort((a, b) => a - b);
+
+                if (availableNumbers.length === 0) {
+                    this.debugLog('No numbers found');
+                    return sequential;
+                }
+
+                // Strategy 1: Try to build longest consecutive sequence starting from 1
                 for (let i = 1; i <= 99; i++) {
                     if (selectedNumbers[i]) {
                         sequential.push(selectedNumbers[i]);
                     } else {
-                        break;
+                        // Allow up to 2 gaps for transcription errors, but stop if we haven't found anything recent
+                        if (sequential.length > 0 && i - sequential[sequential.length - 1].numberValue > 3) {
+                            break;
+                        }
                     }
+                }
+
+                // Strategy 2: If we got very few numbers, try finding any consecutive sequence
+                if (sequential.length < 2) {
+                    sequential.length = 0; // Clear
+
+                    // Find the longest consecutive sequence anywhere in the available numbers
+                    let bestSequence = [];
+                    for (let start = 0; start < availableNumbers.length; start++) {
+                        const currentSequence = [selectedNumbers[availableNumbers[start]]];
+
+                        // Build sequence from this starting point
+                        for (let next = availableNumbers[start] + 1; next <= 99 && selectedNumbers[next]; next++) {
+                            currentSequence.push(selectedNumbers[next]);
+                        }
+
+                        if (currentSequence.length > bestSequence.length) {
+                            bestSequence = currentSequence;
+                        }
+                    }
+
+                    sequential.push(...bestSequence);
                 }
 
                 this.debugLog(`Selected ${sequential.length} sequential numbers:`, sequential.map(n => n.numberValue));
@@ -1468,27 +1517,33 @@
             }
 
             isNumber(text) {
-                if (/^\d{1,2}$/.test(text)) {
-                    const num = parseInt(text);
+                // Strip punctuation from the text first
+                const cleanText = text.replace(/[^\w]/g, '').toLowerCase();
+
+                if (/^\d{1,2}$/.test(cleanText)) {
+                    const num = parseInt(cleanText);
                     return num >= 1 && num <= 99;
                 }
 
-                if (/^\d{1,2}(st|nd|rd|th)$/i.test(text)) {
-                    const num = parseInt(text);
+                if (/^\d{1,2}(st|nd|rd|th)$/i.test(cleanText)) {
+                    const num = parseInt(cleanText);
                     return num >= 1 && num <= 99;
                 }
 
-                return this.getNumberMap().hasOwnProperty(text.toLowerCase());
+                return this.getNumberMap().hasOwnProperty(cleanText);
             }
 
             parseNumber(text) {
-                const digitMatch = text.match(/^(\d{1,2})(st|nd|rd|th)?$/i);
+                // Strip punctuation from the text first
+                const cleanText = text.replace(/[^\w]/g, '').toLowerCase();
+
+                const digitMatch = cleanText.match(/^(\d{1,2})(st|nd|rd|th)?$/i);
                 if (digitMatch) {
                     const num = parseInt(digitMatch[1]);
                     return (num >= 1 && num <= 99) ? num : 0;
                 }
 
-                return this.getNumberMap()[text.toLowerCase()] || 0;
+                return this.getNumberMap()[cleanText] || 0;
             }
 
             getNumberMap() {

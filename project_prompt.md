@@ -2,9 +2,9 @@
 
 ### **1. Executive Summary**
 
-Create a self-contained, single-page HTML application that allows a user to upload an audio file and transcribes it. The application will first display the full transcription alongside a playable waveform of the original audio. The user can then initiate a second step to split the audio into multiple segments based on spoken English numbers (e.g., "one," "two," "three"). Finally, the user can preview the split points on the waveform and download the individual segments or a ZIP archive containing all of them. All processing must occur client-side.
+Create a self-contained, single-page HTML application that allows a user to upload an audio file and transcribes it. The application will first display the full transcription alongside a playable waveform of the original audio. The user can then initiate a second step to extract audio segments containing phrases that follow spoken English numbers (e.g., "one," "two," "three"). Finally, the user can preview the extraction markers on the waveform and download the individual segments or a ZIP archive containing all of them. All processing must occur client-side.
 
-**🔥 CRITICAL FIXES INCORPORATED:** This specification includes mandatory fixes for common issues that have been tested and verified:
+**🔥 IMPLEMENTATION REQUIREMENTS:** This specification includes required fixes for common issues:
 - **CDN Library Loading:** Verified working links and initialization verification to prevent "lamejs is not defined" errors
 - **Audio Data Format:** Mandatory AudioBuffer to Float32Array conversion to prevent "e.subarray is not a function" errors
 - **Error Handling:** Comprehensive error detection and user-friendly messaging
@@ -23,11 +23,11 @@ Create a self-contained, single-page HTML application that allows a user to uplo
     The application should work exclusively in a desktop Chrome browser environment.
 *   **Required Tech Stack (Verified Working Versions - CDN Links Tested):**
 
-    **🔥 CRITICAL: All libraries below have been tested and verified to work correctly. DO NOT change versions or CDN links without testing.**
+    **🔥 CRITICAL: Use the specified library versions and CDN links below.**
 
-    **✅ VERIFIED: @huggingface/transformers v3.7.2 supports `return_timestamps: 'word'` parameter for word-level timestamp extraction. This functionality was introduced in v2.4.0 and continues to work in v3.7.2.**
+    **✅ VERIFIED: @huggingface/transformers v3.7.2 supports `return_timestamps: 'word'` parameter for word-level timestamp extraction.**
 
-    **⚠️ WARNING: The following CDN links have been tested and verified as working. Alternative versions may fail:**
+    **⚠️ REQUIRED CDN LINKS:**
 
     | Library | Version | CDN Link | Status | Plugins |
     |---------|---------|----------|--------|---------|
@@ -37,12 +37,12 @@ Create a self-contained, single-page HTML application that allows a user to uplo
     | lamejs | v1.2.0 | `https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.all.js` | ✅ Verified | N/A |
     | JSZip | v3.10.1 | `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js` | ✅ Verified | N/A |
 
-    **❌ KNOWN BROKEN LINKS (Do not use):**
+    **❌ INCOMPATIBLE LINKS:**
     - `@breezystack/lamejs@1.2.7` - Returns 404 error
     - Any `@breezystack/lamejs` versions - Package does not exist
 
     *   **Audio Transcription:** Use **@huggingface/transformers v3.7.2** (latest stable) with `Xenova/whisper-tiny` model for maximum client-side performance and reduced initial load time. Import via official CDN: `import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js'`
-    *   **Waveform Visualization:** Use **WaveSurfer.js v7.10.1** (latest) with the Regions plugin for split point visualization. Import both as ES modules: `import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'` and `import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'`
+    *   **Waveform Visualization:** Use **WaveSurfer.js v7.10.1** (latest) with the Regions plugin for extraction marker visualization. Import both as ES modules: `import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'` and `import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'`
     *   **MP3 Encoding:** Use **lamejs v1.2.0** (stable version) via CDN: `<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.all.js"></script>`
         *   **CRITICAL - Library Loading Verification:** The lamejs library must be properly loaded and accessible before MP3 encoding. Add defensive checks to verify library availability:
             ```javascript
@@ -51,7 +51,7 @@ Create a self-contained, single-page HTML application that allows a user to uplo
                 throw new Error('lamejs library not loaded. Please check CDN connection.');
             }
 
-            // Alternative global names to check (library might expose different names)
+            // Check for different global names the library might use
             const lameLib = window.lamejs || window.LAME || window.lame;
             if (!lameLib || !lameLib.Mp3Encoder) {
                 throw new Error('MP3 encoder not available. lamejs library may not be properly loaded.');
@@ -69,7 +69,7 @@ Create a self-contained, single-page HTML application that allows a user to uplo
     *   Click-to-seek functionality (FR3)
     *   Real-time playback highlighting (FR4)
     *   Auto-scroll during playback (FR5)
-*   **State 4:** **All features continue functioning** while split markers and downloads are added
+*   **State 4:** **All features continue functioning** while segment markers and downloads are added
 
 Interactive features become available only after transcription completion.
 
@@ -112,7 +112,7 @@ The application must establish a bidirectional relationship between the audio pl
 
 **Implementation Requirements:**
 *   Use `return_timestamps: 'word'` to get individual word timestamps
-*   Replace standard `<textarea>` with `<div>` containing `<span>` elements for each word
+*   Use `<div>` containing `<span>` elements for each word (not `<textarea>`)
 *   Store word timing data in `data-*` attributes on each `<span>` element
 *   Implement click-to-seek using event delegation pattern on parent container
 *   Add real-time highlighting synchronized with audio playback using WaveSurfer's `timeupdate` event
@@ -141,7 +141,7 @@ The application must establish a bidirectional relationship between the audio pl
 *   **File Naming:** Segments should be sequentially named based on the detected number: `1.mp3`, `2.mp3`, `3.mp3`, etc.
 *   **Download Options:**
     *   A list of the generated segments, with an individual download button next to each one.
-    *   A primary "Download All as ZIP" button that downloads a single archive named `split_audio.zip`.
+    *   A primary "Download All as ZIP" button that downloads a single archive named `extracted_audio.zip`.
 
 ### **5. UI and User Experience (UX) Flow**
 
@@ -160,18 +160,18 @@ The application should have four distinct states:
 *   **State 2: Processing (File Loaded)**
     *   Once a file is loaded, the drop area should be replaced by a processing indicator (e.g., a spinner).
     *   The status text must update dynamically to show transcription progress (e.g., "Transcribing... 25%").
-*   **State 3: Transcription Results (Awaiting Split Command)**
+*   **State 3: Transcription Results (Awaiting Extraction Command)**
     *   This state is shown immediately after transcription is complete.
     *   **Waveform Player:** A visual waveform of the full audio.
     *   **Playback Controls:** Explicit **"Play" and "Stop" buttons** that control audio playback of the waveform. The "Play" button should toggle to a "Pause" state during playback.
     *   **Interactive Transcript Display:** An interactive transcript implementing all requirements from Section 2.1, where each word can be clicked to seek audio playback, with real-time highlighting during playback.
     *   **Pause Threshold Configuration:** An editable input field allowing users to adjust the big pause threshold (default 500ms, range 100-2000ms) for structural number detection.
-    *   **Action Button:** A prominent button labeled **"Find & Split Segments"**. The download components are hidden at this stage.
-*   **State 4: Segmented Results (Splitting Complete)**
-    *   This state is shown after the user clicks the "Find & Split Segments" button.
+    *   **Action Button:** A prominent button labeled **"Extract Segments"**. The download components are hidden at this stage.
+*   **State 4: Extracted Results (Extraction Complete)**
+    *   This state is shown after the user clicks the "Extract Segments" button.
     *   The UI from State 3 remains, but with additional components:
     *   **Interactive Transcript:** All Section 2.1 features continue to function (click-to-seek, real-time highlighting, auto-scroll)
-    *   **Split Markers:** Vertical lines on the waveform at each calculated split point.
+    *   **Segment Markers:** Visual indicators showing extraction boundaries for each detected segment. All segment markers must use consistent, clearly visible styling with fixed color and opacity to ensure equal visibility regardless of detection order.
     *   **Download Component:** A list of downloadable segments and a "Download All as ZIP" button now become visible.
 
 ### **6. Core Algorithm (Detailed Steps)**
@@ -257,8 +257,8 @@ The application should have four distinct states:
         *   **Note:** Original buffer remains in WaveSurfer's memory (~200-400MB for 80MB file), transcription processing uses additional ~200-400MB per chunk, cleared after processing
     *   Transition to **State 3** showing the complete waveform and transcription.
 
-*   **Segment Splitting (Second Stage - Triggered by Button Click):**
-    *   **CRITICAL - Robust Splitting Logic:** Before attempting to find and split segments, the code must validate that the `wordTimestamps` variable is a non-empty array. If the model fails to return this word-level data (resulting in undefined or an empty array), the application must not crash. Instead, it should disable the "Find & Split Segments" button and display a clear, user-friendly error message explaining that the necessary word-level timestamp data could not be generated, and that splitting is therefore not possible.
+*   **Segment Extraction (Second Stage - Triggered by Button Click):**
+    *   **CRITICAL - Robust Extraction Logic:** Before attempting to find and extract segments, the code must validate that the `wordTimestamps` variable is a non-empty array. If the model fails to return this word-level data (resulting in undefined or an empty array), the application must not crash. Instead, it should disable the "Extract Segments" button and display a clear, user-friendly error message explaining that the necessary word-level timestamp data could not be generated, and that extraction is therefore not possible.
     *   **User Configuration Interface:** Add an editable input field for pause threshold configuration:
         ```html
         <div class="pause-config">
@@ -273,7 +273,7 @@ The application should have four distinct states:
             </label>
         </div>
         ```
-    *   When the user clicks "Find & Split Segments":
+    *   When the user clicks "Extract Segments":
     *   **Audio Extraction Algorithm:** Extract phrases that follow each number:
         *   **Input Structure:** `<intro> <small-pause> <phrase0> <pause> <One> <pause> <phrase1> <pause> <Two> <pause> <phrase2> <pause> <Three> <pause> <phrase3>`
         *   **Output Mapping:** phrase1 → 1.mp3, phrase2 → 2.mp3, phrase3 → 3.mp3
@@ -297,7 +297,7 @@ The application should have four distinct states:
         *   **Ordinals:** `['1st', '2nd', '3rd', 'first', 'second', 'third']`
         *   **Transcription Error Handling:** Common errors like "to"→"two", "for"→"four", "ate"→"eight"
         *   **Mixed Format Support:** Handle sequences with mixed formats (e.g., "one", "2", "three", "4")
-    *   **Audio Slicing and Encoding (Using Original Audio):**
+    *   **Audio Segment Extraction and Encoding (Using Original Audio):**
         *   **Segment Definition:** Audio segments contain phrases after structural numbers. `1.mp3` contains audio from end-time of "one" to start-time of "two" (the phrase following "one"), `2.mp3` contains audio from end-time of "two" to start-time of "three" (the phrase following "two"), and so on.
         *   **Audio Source:** Use the original `AudioBuffer` extracted from WaveSurfer via `wavesurfer.getDecodedData()` for all segment creation
         *   **Timestamp Mapping:** Convert word timestamps from 16kHz transcription back to original sample rate before slicing:
@@ -314,22 +314,22 @@ The application should have four distinct states:
             *   **Maintain sample rate:** Use original sample rate for MP3 encoding (don't downsample to 44.1kHz)
         *   **Memory-Efficient Encoding:** Process segments one at a time, encoding each segment to MP3 immediately and clearing intermediate buffers to prevent memory buildup.
     *   **UI Update & Download Generation:**
-        *   **Use WaveSurfer.js v7+ Regions Plugin API (Markers are deprecated).** Complete region management workflow:
+        *   **Use WaveSurfer.js v7+ Regions Plugin API.** Complete region management workflow:
             ```javascript
             // Clear existing regions before adding ones
             regions.clearRegions();
 
-            // Add split markers as regions (ONLY after 'ready' event)
+            // Add segment markers as regions (ONLY after 'ready' event)
             wavesurfer.on('ready', () => {
-                splitTimestamps.forEach((timestamp, index) => {
+                segmentBoundaries.forEach((timestamp, index) => {
                     regions.addRegion({
                         start: timestamp,
                         end: timestamp + 0.1, // 0.1 second marker width
                         color: 'rgba(255, 0, 0, 0.3)',
                         drag: false,          // Prevent user dragging
                         resize: false,        // Prevent user resizing
-                        content: `Split ${index + 1}`, // Optional label
-                        id: `split-${index + 1}`       // Unique identifier
+                        content: `Segment ${index + 1}`, // Optional label
+                        id: `segment-${index + 1}`       // Unique identifier
                     });
                 });
             });
@@ -386,7 +386,7 @@ The system MUST validate all timestamps from transcription models and automatica
    }
    ```
 
-2. **Enhanced Validation Function**: The AudioSegmentExtractor validateInput method MUST correct invalid timestamps instead of throwing errors:
+2. **Validation Function**: The AudioSegmentExtractor validateInput method MUST correct invalid timestamps and handle errors:
    ```javascript
    validateInput(words) {
        if (!Array.isArray(words) || words.length === 0) {
@@ -445,7 +445,7 @@ The system MUST validate all timestamps from transcription models and automatica
 *   **🔥 MANDATORY: Initialization Phase Library Verification:**
     *   **CRITICAL:** During `initializeApp()`, verify ALL CDN libraries are loaded BEFORE initializing any other components
     *   **Step 1:** Check `typeof lamejs !== 'undefined'` and `typeof JSZip !== 'undefined'` at the very start of initialization
-    *   **Step 2:** Handle alternative global names: `window.lamejs || window.LAME || window.lame` for lamejs library
+    *   **Step 2:** Check for different global names: `window.lamejs || window.LAME || window.lame` for lamejs library
     *   **Step 3:** Test lamejs functionality: `lamejs.Mp3Encoder(1, 16000, 128)` to ensure it's working
     *   **Step 4:** Fail fast with clear error messages if any required library is missing: "lamejs library not loaded. Please check CDN connection."
     *   **Step 5:** Log successful library verification: `console.log('All CDN libraries verified successfully')`
@@ -470,7 +470,7 @@ The system MUST validate all timestamps from transcription models and automatica
     *   Support mixed formats within same sequence (e.g., "one, 2, three, 4, five")
     *   Handle ordinal numbers (e.g., "1st", "2nd", "first", "second")
     *   Normalize compound numbers (e.g., "twenty one" → "twenty-one" → "21")
-    *   Handle transcription errors (e.g., "to" instead of "two", "for" instead of "four")
+    *   Handle transcription errors (e.g., "to"→"two", "for"→"four")
     *   **🔥 CRITICAL: Handle punctuation in transcribed words** - Strip punctuation before number detection (e.g., "Three.", "Four.", "Five." → "three", "four", "five"). The transcription model often adds punctuation to spoken numbers, which must be removed in both `isNumber()` and `parseNumber()` functions using `text.replace(/[^\w]/g, '')` before processing.
     *   Provide fallback message when no sequential numbers are detected (minimum 2 consecutive numbers required)
     *   Handle partial number sequences up to 99 (e.g., sequence from "one" to "fifty-seven")
@@ -478,7 +478,7 @@ The system MUST validate all timestamps from transcription models and automatica
     *   **CRITICAL:** Verify all CDN libraries are loaded before use with defensive checks: `if (typeof lamejs === 'undefined')`, `if (typeof JSZip === 'undefined')`
     *   Handle cases where CDN libraries fail to load or expose different global names
     *   Provide clear error messages when required libraries are missing: "MP3 encoding unavailable - lamejs library not loaded"
-    *   **Multiple Global Name Support:** Check alternative global names for libraries that may expose different object names (e.g., `window.lamejs || window.LAME || window.lame`)
+    *   **Multiple Global Name Support:** Check different global names for libraries that may expose various object names (e.g., `window.lamejs || window.LAME || window.lame`)
 *   **Network & Model Loading:**
     *   Implement retry mechanism for model download failures
     *   Provide offline fallback message when CDN resources are unavailable
@@ -558,7 +558,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
     2. **Application Initialization:** Verify lamejs and JSZip are available and functional
     3. **File Upload Processing:** Test with real audio file (MP3 format recommended)
     4. **Audio Transcription:** Confirm word-level timestamps are extracted correctly
-    5. **Audio Segmentation:** Verify number sequence detection and audio splitting
+    5. **Audio Extraction:** Verify number sequence detection and segment extraction
     6. **MP3 Encoding:** Test that lamejs successfully creates downloadable segments
     7. **Download Functionality:** Confirm individual downloads and ZIP creation work
 
@@ -567,7 +567,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
     - ✅ No "e.subarray is not a function" errors
     - ✅ All library verification logs appear: "All CDN libraries verified successfully"
     - ✅ Transcription completes with word count: "Transcription complete: X words processed"
-    - ✅ Segmentation succeeds: "Found X numbers in sequence" and "Created X audio segments"
+    - ✅ Extraction succeeds: "Found X numbers in sequence" and "Extracted X audio segments"
     - ✅ Download buttons appear for each segment plus ZIP download
     - ✅ **For 1.mp3 reference file**: Should create exactly 6 download buttons (segments 1.mp3 through 6.mp3)
     - ✅ **Punctuation handling verified**: Algorithm correctly processes transcribed words with punctuation like "Three.", "Four.", "Five.", "Six."
@@ -585,7 +585,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
 
 ### **9. Implementation Structure**
 
-**Recommended HTML Structure:**
+**HTML Structure:**
 ```html
 <!DOCTYPE html>
 <html lang="en">
@@ -639,7 +639,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
                     if (!lameLib || !lameLib.Mp3Encoder) {
                         throw new Error('lamejs library not loaded. Please check CDN connection and ensure lame.all.js is accessible.');
                     }
-                    // Assign to global lamejs if found under alternative name
+                    // Assign to global lamejs if found under different name
                     window.lamejs = lameLib;
                 }
 
@@ -721,9 +721,9 @@ All implementations MUST be tested with the complete workflow to ensure no regre
 ```
 
 **Key Features:**
-- **No conflicting script loading approaches** - uses CDN for globals, ES modules for modern libraries
-- **Latest verified library versions** with specific version numbers for stability
-- **Modern API usage** - Regions instead of deprecated Markers, WebGPU acceleration with CPU fallback
+- **Script Loading** - CDN for globals, ES modules for libraries
+- **Verified library versions** with specific version numbers for stability
+- **API Usage** - WaveSurfer Regions plugin, WebGPU with CPU fallback
 - **Comprehensive error handling** structure for robust initialization and processing
 - **Memory-optimized processing** - chunked processing, progressive cleanup, 1GB memory management
 - **Performance optimizations** - 4-bit quantization, WebGPU acceleration, Web Audio API resampling

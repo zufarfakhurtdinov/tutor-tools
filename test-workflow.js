@@ -133,9 +133,9 @@ async function testAudioWorkflow() {
         await page.waitForFunction(() => {
             // Check if we're in state 3 (transcription complete) by looking for elements
             const buttons = Array.from(document.querySelectorAll('button'));
-            const splitButton = buttons.find(btn => btn.textContent.includes('Find & Split Segments'));
+            const extractButton = buttons.find(btn => btn.textContent.includes('Extract Segments'));
             const transcript = document.getElementById('transcript');
-            return splitButton && splitButton.offsetParent !== null &&
+            return extractButton && extractButton.offsetParent !== null &&
                    transcript && transcript.innerHTML.length > 0;
         }, { timeout: 300000 }); // 5 minutes timeout for transcription
 
@@ -154,22 +154,22 @@ async function testAudioWorkflow() {
 
         console.log('✅ No transcription errors detected');
 
-        // Wait for the split button to be available
-        const splitButton = page.locator('button:has-text("Find & Split Segments")');
-        await splitButton.waitFor({ state: 'visible', timeout: 10000 });
+        // Wait for the extract button to be available
+        const extractButton = page.locator('button:has-text("Extract Segments")');
+        await extractButton.waitFor({ state: 'visible', timeout: 10000 });
 
-        console.log('🔍 Clicking Find & Split Segments button...');
-        await splitButton.click();
+        console.log('🔍 Clicking Extract Segments button...');
+        await extractButton.click();
 
-        // Wait for segmentation to complete
-        console.log('✂️ Waiting for audio segmentation to complete...');
+        // Wait for extraction to complete
+        console.log('✂️ Waiting for audio extraction to complete...');
         await page.waitForFunction(() => {
             const downloads = document.getElementById('downloads');
             return downloads && downloads.style.display !== 'none' &&
                    downloads.innerHTML.includes('mp3');
         }, { timeout: 180000 }); // 3 minutes timeout for segmentation
 
-        console.log('✅ Audio segmentation completed');
+        console.log('✅ Audio extraction completed');
 
         // Check for MP3 encoding errors
         const mp3Errors = errors.filter(err =>

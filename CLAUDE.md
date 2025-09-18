@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an audio transcription and segmentation tool built as a single-page HTML application. The main application is contained in `index.html` which processes audio files client-side to transcribe speech and split audio based on spoken numbers.
+This is an audio transcription and extraction tool built as a single-page HTML application. The main application is contained in `index.html` which processes audio files client-side to transcribe speech and extract segments based on spoken numbers.
 
 ## Build and Development Commands
 
@@ -25,7 +25,7 @@ node test-workflow.js
 **Primary Test**: `test-workflow.js` - Comprehensive end-to-end Playwright test that validates the complete audio processing workflow including:
 - Application initialization and library loading
 - Audio file upload and transcription
-- Audio segmentation and MP3 encoding
+- Audio segment extraction and MP3 encoding
 - Download functionality and ZIP creation
 
 The test uses a local HTTP server on port 8001 and processes the included `1.mp3` file to verify all components work together correctly.

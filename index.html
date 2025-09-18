@@ -343,7 +343,7 @@
     <div id="app">
         <div class="header">
             <h1>🎵 Audio Transcription & Segmentation</h1>
-            <p>Upload an audio file to transcribe and split it by spoken numbers</p>
+            <p>Upload an audio file to transcribe and extract segments by spoken numbers</p>
         </div>
 
         <div class="container">
@@ -384,20 +384,21 @@
                         </button>
                         <div class="pause-config" style="margin-bottom: 15px;">
                             <label for="pause-threshold">
-                                Pause Threshold (Auto-calculated):
+                                Pause Threshold:
                                 <input type="number"
                                        id="pause-threshold"
-                                       value="500"
+                                       placeholder="auto"
                                        min="100"
                                        max="2000"
                                        step="50"
-                                       style="width: 80px; margin: 0 5px;"
-                                       title="This value is automatically calculated as 75% of the longest pause around numbers. You can override it manually."> ms
+                                       disabled
+                                       style="width: 80px; margin: 0 5px; background-color: #f5f5f5; color: #999;"
+                                       title="Will be auto-calculated from audio analysis. You can adjust after extraction."> ms
                             </label>
                         </div>
-                        <button id="splitBtn" class="btn btn-primary">
+                        <button id="extractBtn" class="btn btn-primary">
                             <span>✂️</span>
-                            <span>Find & Split Segments</span>
+                            <span>Extract Segments</span>
                         </button>
                     </div>
                 </div>
@@ -439,7 +440,7 @@
         let transcriber, wavesurfer, regions;
         let wordTimestamps = [];
         let originalBuffer = null;
-        let splitTimestamps = [];
+        let segmentBoundaries = [];
         let audioSegments = [];
         let currentState = 1;
 
@@ -455,7 +456,7 @@
         const transcript = document.getElementById('transcript');
         const playBtn = document.getElementById('playBtn');
         const stopBtn = document.getElementById('stopBtn');
-        const splitBtn = document.getElementById('splitBtn');
+        const extractBtn = document.getElementById('extractBtn');
         const downloads = document.getElementById('downloads');
         const downloadList = document.getElementById('downloadList');
         const downloadAllBtn = document.getElementById('downloadAllBtn');
@@ -643,7 +644,7 @@
             // Playback control handlers
             playBtn.addEventListener('click', togglePlayback);
             stopBtn.addEventListener('click', stopPlayback);
-            splitBtn.addEventListener('click', findAndSplitSegments);
+            extractBtn.addEventListener('click', extractSegments);
             downloadAllBtn.addEventListener('click', downloadAllAsZip);
 
             // WaveSurfer event handlers
@@ -986,12 +987,12 @@
             // Populate interactive transcript
             populateTranscript(wordTimestamps);
 
-            // Enable split button if we have valid word timestamps
+            // Enable extract button if we have valid word timestamps
             if (wordTimestamps && wordTimestamps.length > 0) {
-                splitBtn.disabled = false;
+                extractBtn.disabled = false;
             } else {
-                splitBtn.disabled = true;
-                showError('Word-level timestamp data is not available. Splitting functionality is disabled.');
+                extractBtn.disabled = true;
+                showError('Word-level timestamp data is not available. Extraction functionality is disabled.');
             }
         }
 
@@ -1067,35 +1068,51 @@
             clearTranscriptHighlight();
         }
 
-        async function findAndSplitSegments() {
+        async function extractSegments() {
             try {
                 hideError();
 
                 if (!wordTimestamps || wordTimestamps.length === 0) {
-                    showError('No word-level timestamp data available for splitting.');
+                    showError('No word-level timestamp data available for extraction.');
                     return;
                 }
 
-                splitBtn.disabled = true;
-                splitBtn.innerHTML = '<span>⏳</span><span>Processing...</span>';
+                extractBtn.disabled = true;
+                extractBtn.innerHTML = '<span>⏳</span><span>Processing...</span>';
 
                 updateProgress(0, 'Analyzing transcript for numbers...');
 
                 // Use AudioSegmentExtractor for advanced number detection and segmentation
+                const thresholdInput = document.getElementById('pause-threshold');
+                const userThreshold = thresholdInput.disabled || !thresholdInput.value ? 500 : (parseInt(thresholdInput.value) || 500);
+
                 const extractor = new AudioSegmentExtractor(wordTimestamps, {
-                    pauseThreshold: parseInt(document.getElementById('pause-threshold').value) || 500,
+                    pauseThreshold: userThreshold,
                     debug: true
                 });
 
-                const extractedSegments = extractor.extractAudioSegments();
+                const extractionResult = extractor.extractAudioSegments();
+                const extractedSegments = extractionResult.segments;
 
-                // Update UI with the adaptive threshold that was calculated
-                const adaptiveThreshold = extractor.config.pauseThreshold;
-                document.getElementById('pause-threshold').value = Math.round(adaptiveThreshold);
+                // Update UI with the adaptive threshold that was calculated and enable user override
+                const adaptiveThreshold = extractionResult.usedThreshold;
+
+                // Only update and enable if this was the first adaptive calculation
+                if (thresholdInput.disabled) {
+                    thresholdInput.value = Math.round(adaptiveThreshold);
+                    thresholdInput.disabled = false;
+                    thresholdInput.style.backgroundColor = '#ffffff';
+                    thresholdInput.style.color = '#333';
+                    thresholdInput.title = `Calculated: ${Math.round(adaptiveThreshold)}ms. You can adjust this value and click Extract again to use your setting.`;
+
+                    // Update button text to indicate user can now adjust
+                    const extractBtn = document.getElementById('extractBtn');
+                    extractBtn.innerHTML = '<span>✂️</span><span>Re-extract with Custom Threshold</span>';
+                }
 
                 if (extractedSegments.length < 1) {
                     showError('Could not find a sequence of at least 1 consecutive number. Please ensure your audio contains spoken numbers like "one, two, three" or "1, 2, 3" followed by phrases.');
-                    resetSplitButton();
+                    resetExtractButton();
                     return;
                 }
 
@@ -1111,17 +1128,17 @@
                 }));
 
                 // Store phrase segments for audio creation
-                splitTimestamps = phraseSegments;
+                segmentBoundaries = phraseSegments;
 
                 updateProgress(30, 'Creating audio segments...');
 
                 // Create segments from original buffer
                 await createAudioSegments();
 
-                updateProgress(90, 'Adding split markers to waveform...');
+                updateProgress(90, 'Adding segment markers to waveform...');
 
                 // Add visual markers to waveform
-                addSplitMarkers();
+                addSegmentMarkers();
 
                 updateProgress(100, 'Segmentation complete!');
 
@@ -1132,16 +1149,16 @@
                 // Update state
                 updateState(4, 'Segmented Results');
 
-                // Reset split button
-                resetSplitButton();
+                // Reset extract button
+                resetExtractButton();
 
                 // Populate download list
                 populateDownloadList();
 
             } catch (error) {
                 console.error('Segmentation error:', error);
-                showError(`Failed to split audio: ${error.message}`);
-                resetSplitButton();
+                showError(`Failed to extract segments: ${error.message}`);
+                resetExtractButton();
             }
         }
 
@@ -1161,13 +1178,23 @@
 
             extractAudioSegments() {
                 try {
-                    // Phase 1: Adaptive Threshold Calculation
-                    const adaptiveThreshold = this.calculateAdaptiveThreshold();
-                    this.debugLog(`Calculated adaptive threshold: ${adaptiveThreshold.toFixed(0)}ms`);
+                    // Phase 1: Check if user has overridden the threshold
+                    const userThreshold = this.config.pauseThreshold;
+                    let finalThreshold;
 
-                    // Update config with calculated threshold
+                    if (userThreshold === 500) {
+                        // Use adaptive calculation for initial run
+                        finalThreshold = this.calculateAdaptiveThreshold();
+                        this.debugLog(`Using calculated adaptive threshold: ${finalThreshold.toFixed(0)}ms`);
+                    } else {
+                        // Use user-provided threshold
+                        finalThreshold = userThreshold;
+                        this.debugLog(`Using user-specified threshold: ${finalThreshold.toFixed(0)}ms`);
+                    }
+
+                    // Update config with final threshold
                     const originalThreshold = this.config.pauseThreshold;
-                    this.config.pauseThreshold = adaptiveThreshold;
+                    this.config.pauseThreshold = finalThreshold;
 
                     // Phase 2: Structural Number Detection
                     let structuralNumbers = this.findStructuralNumbers();
@@ -1187,10 +1214,10 @@
                     const segments = this.createExtractionSegments(structuralNumbers);
                     this.validateSegments(segments);
 
-                    // Restore original threshold in config
-                    this.config.pauseThreshold = originalThreshold;
+                    // Keep the final threshold that was actually used (don't restore original)
+                    // this.config.pauseThreshold now contains the threshold that was actually used
 
-                    return segments;
+                    return { segments, usedThreshold: finalThreshold };
                 } catch (error) {
                     this.debugLog('Extraction failed:', error.message);
                     throw error;
@@ -1586,19 +1613,19 @@
         async function createAudioSegments() {
             audioSegments = [];
 
-            if (!originalBuffer || splitTimestamps.length === 0) {
-                throw new Error('No audio data or split points available');
+            if (!originalBuffer || segmentBoundaries.length === 0) {
+                throw new Error('No audio data or segment boundaries available');
             }
 
-            // splitTimestamps now contains phrase segments with start/end times
-            for (let i = 0; i < splitTimestamps.length; i++) {
-                const segment = splitTimestamps[i];
+            // segmentBoundaries now contains phrase segments with start/end times
+            for (let i = 0; i < segmentBoundaries.length; i++) {
+                const segment = segmentBoundaries[i];
                 const startTime = segment.startTime;
                 const endTime = segment.endTime;
 
                 updateProgress(
-                    30 + (i / splitTimestamps.length) * 50,
-                    `Creating segment ${segment.number} of ${splitTimestamps.length}...`
+                    30 + (i / segmentBoundaries.length) * 50,
+                    `Extracting segment ${segment.number} of ${segmentBoundaries.length}...`
                 );
 
                 // Extract segment from original buffer (phrase after the number)
@@ -1667,7 +1694,7 @@
                         if (channels === 1) {
                             mp3buf = mp3Encoder.encodeBuffer(chunk);
                         } else {
-                            // Split interleaved stereo data
+                            // Separate interleaved stereo data
                             const left = new Int16Array(chunkSize);
                             const right = new Int16Array(chunkSize);
                             for (let j = 0; j < chunkSize && (i + j * 2) < samples.length; j++) {
@@ -1698,14 +1725,14 @@
             });
         }
 
-        function addSplitMarkers() {
-            if (!regions || splitTimestamps.length === 0) return;
+        function addSegmentMarkers() {
+            if (!regions || segmentBoundaries.length === 0) return;
 
             // Clear existing regions
             regions.clearRegions();
 
             // Add regions for phrase segments
-            splitTimestamps.forEach((segment, index) => {
+            segmentBoundaries.forEach((segment, index) => {
                 regions.addRegion({
                     start: segment.startTime,
                     end: segment.endTime,
@@ -1717,7 +1744,7 @@
                 });
             });
 
-            console.log(`Added ${splitTimestamps.length} phrase regions to waveform`);
+            console.log(`Added ${segmentBoundaries.length} segment regions to waveform`);
         }
 
         function populateDownloadList() {
@@ -1798,7 +1825,7 @@
                 const url = URL.createObjectURL(zipBlob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'split_audio.zip';
+                a.download = 'extracted_audio.zip';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
@@ -1816,16 +1843,16 @@
             }
         }
 
-        function resetSplitButton() {
-            splitBtn.disabled = false;
-            splitBtn.innerHTML = '<span>✂️</span><span>Find & Split Segments</span>';
+        function resetExtractButton() {
+            extractBtn.disabled = false;
+            extractBtn.innerHTML = '<span>✂️</span><span>Extract Segments</span>';
         }
 
         function resetToInitialState() {
             // Reset all variables
             wordTimestamps = [];
             originalBuffer = null;
-            splitTimestamps = [];
+            segmentBoundaries = [];
             audioSegments = [];
 
             // Reset UI
@@ -1836,6 +1863,14 @@
 
             // Reset file input
             fileInput.value = '';
+
+            // Reset pause threshold input
+            const thresholdInput = document.getElementById('pause-threshold');
+            thresholdInput.value = '';
+            thresholdInput.disabled = true;
+            thresholdInput.style.backgroundColor = '#f5f5f5';
+            thresholdInput.style.color = '#999';
+            thresholdInput.title = 'Will be auto-calculated from audio analysis. You can adjust after extraction.';
 
             // Reset progress
             updateProgress(0, '');

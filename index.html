@@ -503,6 +503,55 @@
             return `${size.toFixed(1)} ${units[unitIndex]}`;
         }
 
+        function logWordTimestampsWithPauses(words) {
+            if (!words || words.length === 0) {
+                console.log('No wordTimestamps to display');
+                return;
+            }
+
+            console.log('\n=== Word Timestamps with Pauses ===');
+            console.log(`Total words: ${words.length}`);
+            console.log('Format: [word] (confidence) [pause_length] -> next_word\n');
+
+            for (let i = 0; i < words.length; i++) {
+                const word = words[i];
+                const wordInfo = `"${word.text}" (${(word.confidence || 1.0).toFixed(2)})`;
+
+                if (i === 0) {
+                    // First word - no pause before
+                    console.log(`[START] -> ${wordInfo}`);
+                } else {
+                    // Calculate pause between previous word and current word
+                    const prevWord = words[i - 1];
+                    const pause = Math.max(0, word.start - prevWord.end);
+                    const pauseMs = Math.round(pause * 1000);
+
+                    let pauseDisplay;
+                    if (pauseMs === 0) {
+                        pauseDisplay = '[no-pause]';
+                    } else if (pauseMs < 100) {
+                        pauseDisplay = `[${pauseMs}ms]`;
+                    } else {
+                        pauseDisplay = `[${pauseMs}ms]`.padEnd(8);
+                    }
+
+                    console.log(`${pauseDisplay} -> ${wordInfo}`);
+                }
+
+                // Show if this is the last word
+                if (i === words.length - 1) {
+                    console.log(`         -> [END]`);
+                }
+            }
+
+            console.log('\n=== Summary ===');
+            const totalDuration = words[words.length - 1].end - words[0].start;
+            const avgConfidence = words.reduce((sum, w) => sum + (w.confidence || 1.0), 0) / words.length;
+            console.log(`Total duration: ${totalDuration.toFixed(2)}s`);
+            console.log(`Average confidence: ${avgConfidence.toFixed(3)}`);
+            console.log('=== End ===\n');
+        }
+
         // Progress callback handler with defensive programming
         function handleProgressCallback(progress) {
             let statusText = `Initializing Model... ${progress.status}`;
@@ -807,19 +856,24 @@
                                 const adjustedStart = chunk.timestamp[0] + startTime;
                                 const adjustedEnd = chunk.timestamp[1] + startTime;
 
+                                // Extract confidence score (default to 1.0 if not available)
+                                const confidence = chunk.confidence || chunk.score || 1.0;
+
                                 // CRITICAL: Validate timestamp before adding to array
                                 if (adjustedEnd > adjustedStart) {
                                     wordTimestamps.push({
                                         text: chunk.text.trim(),
                                         start: adjustedStart,
-                                        end: adjustedEnd
+                                        end: adjustedEnd,
+                                        confidence: confidence
                                     });
                                 } else if (adjustedStart === adjustedEnd) {
                                     // Handle zero-duration words by adding minimal duration
                                     wordTimestamps.push({
                                         text: chunk.text.trim(),
                                         start: adjustedStart,
-                                        end: adjustedStart + 0.001 // 1ms minimum duration
+                                        end: adjustedStart + 0.001, // 1ms minimum duration
+                                        confidence: confidence
                                     });
                                 } else {
                                     // Skip invalid timestamps where start > end
@@ -839,8 +893,9 @@
                 updateProgress(95, 'Finalizing transcription...');
 
                 console.log(`Transcription complete: ${wordTimestamps.length} words processed`);
-                // Debug: Log first 20 words to see what's being transcribed
-                console.log('First 20 transcribed words:', wordTimestamps.slice(0, 20).map(w => w.text));
+
+                // Debug: Log word timestamps with pause visualization (ALL words)
+                logWordTimestampsWithPauses(wordTimestamps);
 
                 if (wordTimestamps.length === 0) {
                     throw new Error('No words were transcribed from the audio. Please check that the audio contains clear speech.');

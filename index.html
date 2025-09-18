@@ -582,7 +582,7 @@
                 env.allowRemoteModels = true;
                 env.allowLocalModels = false;
 
-                console.log('Initializing transcription model: Xenova/whisper-tiny');
+                console.log('Initializing transcription model: Xenova/whisper-base');
 
                 // Initialize AI model with WebGPU fallback to CPU
                 let device = 'webgpu';
@@ -597,7 +597,7 @@
                     device = 'cpu';
                 }
 
-                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
                     device: device,
                     dtype: device === 'webgpu' ? 'q4' : 'fp32',
                     progress_callback: handleProgressCallback
@@ -1315,6 +1315,13 @@
             calculateAdaptiveThreshold() {
                 this.debugLog('=== Adaptive Threshold Calculation Phase ===');
 
+                // TEMPORARILY DISABLED: Use constant 800ms threshold for debugging
+                const constantThreshold = 800;
+                this.debugLog(`Using CONSTANT threshold for debugging: ${constantThreshold}ms`);
+                return constantThreshold;
+
+                // ORIGINAL ADAPTIVE CALCULATION (commented out for debugging):
+                /*
                 const numberPauseData = this.analyzeAllNumberPauses();
 
                 if (numberPauseData.length === 0) {
@@ -1349,6 +1356,7 @@
                 });
 
                 return boundedThreshold;
+                */
             }
 
             analyzeAllNumberPauses() {

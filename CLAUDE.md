@@ -15,9 +15,13 @@ This is an audio transcription and extraction tool built as a single-page HTML a
 npm install
 ```
 
-**Main Testing Workflow**:
+**Main Testing Workflows**:
 ```bash
+# Single file test (original)
 node test-workflow.js
+
+# Full evaluation of all audio files
+node eval-workflow-sequential.js
 ```
 
 ## Testing Framework
@@ -28,12 +32,20 @@ node test-workflow.js
 - Audio segment extraction and MP3 encoding
 - Download functionality and ZIP creation
 
-The test uses a local HTTP server on port 8001 and processes the included `eval/KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3` file to verify all components work together correctly.
+**Evaluation Workflow**: Comprehensive testing of all audio files in the `eval/` directory:
+- `eval-workflow-sequential.js` - Tests all 10 audio files sequentially (reliable and efficient)
+
+**Current Test Results** (from eval-workflow-sequential.js):
+- 10 audio files tested, 8 passed (80% success rate)
+- Total segments extracted: 31 across all files
+- Average processing time: 20 seconds per file
+- Total evaluation time: ~4 minutes
+- Two files fail: Unit2_Track_06 (extraction) and Unit6_Track_21 (intermittent)
 
 **Test Requirements**:
 - Playwright (automatically installed via package.json)
 - Chrome browser (automatically installed by Playwright)
-- Local audio file: `eval/KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3` (included in repository - contains spoken numbers "1, 2, 3, 4, 5, 6", expected to extract 6 audio segments)
+- Audio files in `eval/` directory (10 KidsBox educational content files included)
 
 ## Architecture Overview
 
@@ -45,9 +57,9 @@ The test uses a local HTTP server on port 8001 and processes the included `eval/
 ## Key Files
 
 - `index.html` - Main application (single-page HTML with embedded JavaScript)
-- `test-workflow.js` - End-to-end Playwright testing workflow
-- `eval/` - Directory containing test audio files (KidsBox educational content)
-- `eval/KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3` - Primary test audio file
+- `test-workflow.js` - End-to-end Playwright testing workflow (single file test)
+- `eval-workflow-sequential.js` - Sequential evaluation of all audio files
+- `eval/` - Directory containing 10 test audio files (KidsBox educational content)
 - `project_prompt.md` - Comprehensive technical specification
 - `package.json` - Dependencies (mainly Playwright for testing)
 
@@ -55,8 +67,14 @@ The test uses a local HTTP server on port 8001 and processes the included `eval/
 
 When making changes to the application:
 1. Edit `index.html` directly
-2. Run `node test-workflow.js` to verify complete functionality
-3. Check console output for any library loading or processing errors
-4. Test with different audio files if needed
+2. Run `node test-workflow.js` for quick single-file verification
+3. Run `node eval-workflow-sequential.js` for comprehensive testing of all audio files
+4. Check console output for any library loading or processing errors
+5. Review detailed test reports for performance and error analysis
 
-The test workflow validates the entire pipeline from file upload through final download generation.
+**Testing Strategy**:
+- **Development**: Use `test-workflow.js` for rapid iteration
+- **Pre-commit**: Use `eval-workflow-sequential.js` for thorough validation
+- **CI/CD**: Use `eval-workflow-sequential.js` for reliable automated testing
+
+The evaluation workflow provides comprehensive validation across 10 different audio files, detecting edge cases and ensuring robust performance across various content types. Sequential processing has proven to be the most reliable approach for this audio processing application.

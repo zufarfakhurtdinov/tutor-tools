@@ -36,11 +36,7 @@ node eval-workflow-sequential.js
 - `eval-workflow-sequential.js` - Tests all 10 audio files sequentially (reliable and efficient)
 
 **Current Test Results** (from eval-workflow-sequential.js):
-- 10 audio files tested, 8 passed (80% success rate)
-- Total segments extracted: 31 across all files
-- Average processing time: 20 seconds per file
-- Total evaluation time: ~4 minutes
-- Two files fail: Unit2_Track_06 (extraction) and Unit6_Track_21 (intermittent)
+- See `eval-report.md` for detailed test results and analysis
 
 **Test Requirements**:
 - Playwright (automatically installed via package.json)
@@ -59,6 +55,7 @@ node eval-workflow-sequential.js
 - `index.html` - Main application (single-page HTML with embedded JavaScript)
 - `test-workflow.js` - End-to-end Playwright testing workflow (single file test)
 - `eval-workflow-sequential.js` - Sequential evaluation of all audio files
+- `eval-report.md` - Detailed evaluation results and performance analysis
 - `eval/` - Directory containing 10 test audio files (KidsBox educational content)
 - `project_prompt.md` - Comprehensive technical specification
 - `package.json` - Dependencies (mainly Playwright for testing)

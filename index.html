@@ -511,37 +511,28 @@
 
             console.log('\n=== Word Timestamps with Pauses ===');
             console.log(`Total words: ${words.length}`);
-            console.log('Format: [word] (confidence) [pause_length] -> next_word\n');
+            console.log('Format: word | start-end | confidence | pauseBefore | pauseAfter\n');
 
             for (let i = 0; i < words.length; i++) {
                 const word = words[i];
-                const wordInfo = `"${word.text}" (${(word.confidence || 1.0).toFixed(2)})`;
 
-                if (i === 0) {
-                    // First word - no pause before
-                    console.log(`[START] -> ${wordInfo}`);
-                } else {
-                    // Calculate pause between previous word and current word
-                    const prevWord = words[i - 1];
-                    const pause = Math.max(0, word.start - prevWord.end);
-                    const pauseMs = Math.round(pause * 1000);
-
-                    let pauseDisplay;
-                    if (pauseMs === 0) {
-                        pauseDisplay = '[no-pause]';
-                    } else if (pauseMs < 100) {
-                        pauseDisplay = `[${pauseMs}ms]`;
-                    } else {
-                        pauseDisplay = `[${pauseMs}ms]`.padEnd(8);
-                    }
-
-                    console.log(`${pauseDisplay} -> ${wordInfo}`);
+                // Calculate pauseBefore: diff between start of current word and end of previous word (or 0 if first)
+                let pauseBefore = 0;
+                if (i > 0) {
+                    pauseBefore = Math.max(0, word.start - words[i - 1].end);
                 }
 
-                // Show if this is the last word
-                if (i === words.length - 1) {
-                    console.log(`         -> [END]`);
+                // Calculate pauseAfter: diff between end of current word and start of next word (or 0 if last)
+                let pauseAfter = 0;
+                if (i < words.length - 1) {
+                    pauseAfter = Math.max(0, words[i + 1].start - word.end);
                 }
+
+                const confidence = (word.confidence || 1.0).toFixed(2);
+                const pauseBeforeMs = Math.round(pauseBefore * 1000);
+                const pauseAfterMs = Math.round(pauseAfter * 1000);
+
+                console.log(`"${word.text}" | ${word.start.toFixed(2)}-${word.end.toFixed(2)}s | conf:${confidence} | before:${pauseBeforeMs}ms | after:${pauseAfterMs}ms`);
             }
 
             console.log('\n=== Summary ===');

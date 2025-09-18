@@ -28,12 +28,12 @@ node test-workflow.js
 - Audio segment extraction and MP3 encoding
 - Download functionality and ZIP creation
 
-The test uses a local HTTP server on port 8001 and processes the included `1.mp3` file to verify all components work together correctly.
+The test uses a local HTTP server on port 8001 and processes the included `eval/KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3` file to verify all components work together correctly.
 
 **Test Requirements**:
 - Playwright (automatically installed via package.json)
 - Chrome browser (automatically installed by Playwright)
-- Local audio file: `1.mp3` (included in repository - contains spoken numbers "1, 2, 3, 4, 5, 6", expected to extract 6 audio segments)
+- Local audio file: `eval/KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3` (included in repository - contains spoken numbers "1, 2, 3, 4, 5, 6", expected to extract 6 audio segments)
 
 ## Architecture Overview
 
@@ -46,7 +46,8 @@ The test uses a local HTTP server on port 8001 and processes the included `1.mp3
 
 - `index.html` - Main application (single-page HTML with embedded JavaScript)
 - `test-workflow.js` - End-to-end Playwright testing workflow
-- `1.mp3` - Sample audio file for testing
+- `eval/` - Directory containing test audio files (KidsBox educational content)
+- `eval/KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3` - Primary test audio file
 - `project_prompt.md` - Comprehensive technical specification
 - `package.json` - Dependencies (mainly Playwright for testing)
 

@@ -114,12 +114,12 @@ async function testAudioWorkflow() {
 
         console.log('✅ No library loading errors detected');
 
-        // Upload the 1.mp3 file using the hidden file input
-        console.log('📤 Uploading 1.mp3 file...');
-        const audioFilePath = path.resolve(__dirname, '1.mp3');
+        // Upload the KidsBox audio file using the hidden file input
+        console.log('📤 Uploading KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3 file...');
+        const audioFilePath = path.resolve(__dirname, 'eval', 'KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3');
 
         if (!fs.existsSync(audioFilePath)) {
-            throw new Error('1.mp3 file not found');
+            throw new Error('KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3 file not found');
         }
 
         // Use the file input directly (it's connected to the dropzone click handler)
@@ -192,9 +192,9 @@ async function testAudioWorkflow() {
             throw new Error('No download buttons found after segmentation');
         }
 
-        // Verify expected number of segments for 1.mp3 (contains "1, 2, 3, 4, 5, 6")
+        // Verify expected number of segments for KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3 (contains "1, 2, 3, 4, 5, 6")
         if (downloadButtons !== 6) {
-            console.log(`⚠️ Expected 6 download buttons for 1.mp3 file, found ${downloadButtons}`);
+            console.log(`⚠️ Expected 6 download buttons for KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3, found ${downloadButtons}`);
             console.log(`   This may indicate issues with number detection or segmentation algorithm`);
         }
 

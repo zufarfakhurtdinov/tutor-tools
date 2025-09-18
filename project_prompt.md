@@ -569,7 +569,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
     - ✅ Transcription completes with word count: "Transcription complete: X words processed"
     - ✅ Extraction succeeds: "Found X numbers in sequence" and "Extracted X audio segments"
     - ✅ Download buttons appear for each segment plus ZIP download
-    - ✅ **For 1.mp3 reference file**: Should create exactly 6 download buttons (segments 1.mp3 through 6.mp3)
+    - ✅ **For KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3**: Should create exactly 6 download buttons (segments 1.mp3 through 6.mp3)
     - ✅ **Punctuation handling verified**: Algorithm correctly processes transcribed words with punctuation like "Three.", "Four.", "Five.", "Six."
 
 *   **Acceptable Warnings (Non-Critical):**
@@ -581,7 +581,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
     - Audio file should contain spoken numbers in sequence (e.g., "one, two, three, four, five, six")
     - Duration: 60-120 seconds for reasonable test time
     - Format: MP3 or WAV with clear speech
-    - **Reference file**: `1.mp3` contains spoken numbers "1, 2, 3, 4, 5, 6" and should extract 6 audio segments
+    - **Reference file**: `eval/KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3` contains spoken numbers "1, 2, 3, 4, 5, 6" and should extract 6 audio segments
 
 ### **9. Implementation Structure**
 

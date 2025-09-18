@@ -26,6 +26,9 @@ node eval-workflow-sequential.js
 
 ## Testing Framework
 
+**CRITICAL: EVAL IS ALWAYS RIGHT - IT IS THE SOURCE OF TRUTH**
+The evaluation workflow (`eval-workflow-sequential.js`) is the definitive authority on application correctness and performance. Its results must be used as requirements and any changes to the application must satisfy the evaluation criteria.
+
 **Primary Test**: `test-workflow.js` - Comprehensive end-to-end Playwright test that validates the complete audio processing workflow including:
 - Application initialization and library loading
 - Audio file upload and transcription

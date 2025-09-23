@@ -274,10 +274,24 @@ The application should have four distinct states:
         </div>
         ```
     *   When the user clicks "Extract Segments":
-    *   **Audio Extraction Algorithm:** Extract phrases that follow each number:
+    *   **Audio Extraction Algorithm:** The application supports two distinct audio structures with automatic detection:
+
+    **Structure Type 1: Number-Based Segmentation**
         *   **Input Structure:** `<intro> <small-pause> <phrase0> <pause> <One> <pause> <phrase1> <pause> <Two> <pause> <phrase2> <pause> <Three> <pause> <phrase3>`
         *   **Output Mapping:** phrase1 → 1.mp3, phrase2 → 2.mp3, phrase3 → 3.mp3
+        *   **Detection Method:** Identifies spoken numbers (1, 2, 3... or one, two, three...) followed by phrases
         *   **Segments contain only the phrases after numbers, not the numbers themselves**
+
+    **Structure Type 2: Pause-Based Segmentation**
+        *   **Input Structure:** `<intro> <pause> <phrase1> <pause> <phrase2> <pause> <phrase3>`
+        *   **Output Mapping:** phrase1 → 1.mp3, phrase2 → 2.mp3, phrase3 → 3.mp3
+        *   **Detection Method:** Identifies significant pauses to determine segment boundaries
+        *   **Segments contain phrases separated by natural pauses in speech**
+
+    **Automatic Mode Detection:**
+        *   The algorithm analyzes the transcription to determine which structure type is present
+        *   Falls back to pause-based segmentation when insufficient sequential numbers are detected
+        *   Provides clear feedback about which detection mode was used
     *   **Multi-Phase Algorithm:**
         *   **Phase 1 - Adaptive Threshold Calculation:**
             *   Analyze pause patterns around all numbers in the transcription

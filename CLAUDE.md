@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an audio transcription and extraction tool built as a single-page HTML application. The main application is contained in `index.html` which processes audio files client-side to transcribe speech and extract segments based on spoken numbers.
+This is an audio transcription and extraction tool built as a single-page HTML application. The main application is contained in `index.html` which processes audio files client-side to transcribe speech and extract segments based on spoken numbers or pause patterns.
 
 ## Build and Development Commands
 
@@ -17,7 +17,7 @@ npm install
 
 **Main Testing Workflows**:
 ```bash
-# Single file test (original)
+# Single file test
 node test-workflow.js
 
 # Full evaluation of all audio files
@@ -78,3 +78,13 @@ When making changes to the application:
 - **CI/CD**: Use `eval-workflow-sequential.js` for reliable automated testing
 
 The evaluation workflow provides comprehensive validation across 10 different audio files, detecting edge cases and ensuring robust performance across various content types. Sequential processing has proven to be the most reliable approach for this audio processing application.
+
+## Writing Style Guidelines
+
+**CRITICAL**: NEVER use comparison language in project documentation or code comments. Avoid words like:
+- "new", "old", "updated", "improved", "enhanced", "better", "worse"
+- "previous", "current", "latest", "modern", "legacy"
+- "upgrade", "downgrade", "replace", "supersede"
+- Any temporal comparisons or value judgments between versions/approaches
+
+Instead, describe functionality objectively and factually without comparisons.

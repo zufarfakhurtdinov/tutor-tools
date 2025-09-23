@@ -7,7 +7,7 @@
 ## 📊 Executive Summary
 
 - **Total Files Tested:** 10
-- **Success Rate:** 90% (9 passed, 1 failed)
+- **Success Rate:** 80% (8 passed, 2 failed)
 - **Total Segments Extracted:** 33
 - **Average Processing Time:** 20 seconds per file
 - **Total Processing Time:** 221 seconds
@@ -19,7 +19,7 @@
 |---|------|--------|----------|--------|------|-------|-------|
 | 1 | KidsBox_ActivityBook1_Unit10_Page72_Track_38.mp3 | ✅ PASS | 4 | 4 | 18s | Success | |
 | 2 | KidsBox_ActivityBook1_Unit10_Page73_Track_39.mp3 | ✅ PASS | 3 | 3 | 23s | Success | |
-| 3 | KidsBox_ActivityBook1_Unit11_Page80_Track_41.mp3 | ✅ PASS | 2 | 2 | 19s | Success | **Marked by pauses** |
+| 3 | KidsBox_ActivityBook1_Unit11_Page80_Track_41.mp3 | ❌ FAIL | 6 | 2 | 19s | Segment count mismatch | **Marked by pauses** |
 | 4 | KidsBox_ActivityBook1_Unit12_Page86_Track_43.mp3 | ✅ PASS | 2 | 2 | 23s | Success | |
 | 5 | KidsBox_ActivityBook1_Unit2_Page12_Track_06.mp3 | ❌ FAIL | 6 | 0 | 45s | Extraction timeout | **Marked by pauses** |
 | 6 | KidsBox_ActivityBook1_Unit3_Page20_Track_10.mp3 | ✅ PASS | 6 | 6 | 18s | Success | |
@@ -47,14 +47,14 @@
 ## 🎯 Segment Extraction Analysis
 
 ### Expected vs Actual Segments
-- **Total Expected:** 33 segments
+- **Total Expected:** 37 segments (updated with correct Unit11_Track_41 expectation)
 - **Total Extracted:** 33 segments
-- **Extraction Rate:** 100%
+- **Extraction Rate:** 89%
 
 ### Per-File Segment Analysis
-- **Perfect Matches:** 9 files (90%)
+- **Perfect Matches:** 8 files (80%)
 - **Close Matches (±1):** 0 files
-- **Significant Gaps:** 1 file (Unit2_Track_06: extraction timeout)
+- **Significant Gaps:** 2 files (Unit11_Track_41: 2/6 segments, Unit2_Track_06: extraction timeout)
 
 ## 📝 Test Configuration Notes
 
@@ -64,40 +64,43 @@ Two files in the test suite are specifically marked as "by pauses" in the evalua
 - **Unit2_Page12_Track_06.mp3** (Line 59 in eval-workflow-sequential.js)
 
 These files are expected to have segments determined by audio pause detection rather than spoken numbers. Current results:
-- Unit11_Track_41: Expected 2 segments, got 2 (success)
+- Unit11_Track_41: Expected 6 segments, got 2 (significant detection failure)
 - Unit2_Track_06: Expected 6 segments, got 0 (complete extraction timeout)
 
-One pause-detected file performs well while the other continues to fail with extraction timeouts.
+Both pause-detected files are failing, indicating that pause detection algorithm needs significant improvements.
 
 ## 🔍 Failure Analysis
 
 ### Primary Issues
 1. **Extraction Timeouts (1 file):** Unit2_Track_06 fails at extraction stage
+2. **Segment Count Mismatches (1 file):** Unit11_Track_41 extracts fewer segments than expected
 
 ### Error Patterns
-- **Console Errors:** 5 errors for failed file
-- **Extraction Stage:** Main bottleneck with 10% failure rate
+- **Console Errors:** Multiple errors across failed files
+- **Extraction Stage:** Main bottleneck with 20% failure rate
+- **Pause Detection:** Poor performance on pause-based segmentation
 - **Timeout Threshold:** 30s may be insufficient for complex audio files
 
 ## 📈 Comparison with Historical Data
 
 ### Previous Documented Performance (CLAUDE.md)
 - **Historical Success Rate:** 80% (8/10 passed)
-- **Current Success Rate:** 90% (9/10 passed)
-- **Performance Improvement:** 10 percentage points increase
+- **Current Success Rate:** 80% (8/10 passed)
+- **Performance Status:** Equivalent performance maintained
 
-### Possible Causes for Improvement
-- Algorithm refinements
-- Better error handling
-- Optimized processing conditions
-- System performance improvements
+### Performance Stability Factors
+- Consistent algorithm performance
+- Stable error handling
+- Maintained processing conditions
+- Reliable system performance
 
 ## 🛠️ Recommendations
 
 ### Immediate Actions
 1. **Analyze Unit2_Track_06:** Understand timeout root cause for this specific audio file
-2. **Review Console Errors:** Address error patterns in the failing file
-3. **Increase Timeout Threshold:** Consider extending beyond 30s for complex files
+2. **Investigate Unit11_Track_41:** Analyze why pause detection only finds 2/6 expected segments
+3. **Review Console Errors:** Address error patterns in failing files
+4. **Improve Pause Detection:** Focus on pause-based segmentation algorithm
 
 ### Long-term Improvements
 1. **Error Handling:** Better graceful degradation for problematic files

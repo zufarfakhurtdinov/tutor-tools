@@ -12,8 +12,8 @@ Create a self-contained, single-page HTML application that allows a user to uplo
 
 ### **2. Core Technical Requirements**
 
-*   **Single File Delivery:** The entire application's custom code (HTML, CSS, JavaScript) must be contained within a single `index.html` file. Use a hybrid approach: load utility libraries (JSZip, lamejs) via CDN `<script>` tags, and import modern libraries (Transformers.js) as ES modules within the main application script.
-*   **Reliable Script Execution:** Use ES modules for the main application logic. ES modules naturally wait for dependencies and handle execution order correctly. Utility libraries loaded via script tags will be available globally before the module executes.
+*   **Single File Delivery:** The entire application's custom code (HTML, CSS, JavaScript) must be contained within a single `index.html` file. Use a hybrid approach: load utility libraries (JSZip, lamejs, Whisper.cpp WASM) via CDN `<script>` tags within the main application script.
+*   **Reliable Script Execution:** Use standard script tags for all libraries. Libraries loaded via script tags will be available globally and execute in order.
 *   **Client-Side Only:** No server-side processing or external API calls are allowed. The app must function offline once loaded (assuming the CDN-hosted libraries and models have been cached by the browser).
 *   **Browser Compatibility:** Target **Google Chrome 140.0.7339.133 or newer only**. The application does not need to support other browsers, older Chrome versions, or cross-browser compatibility. Use modern Chrome-specific features freely.
 *   **Accessibility Scope:** This is a desktop-only application for Chrome. **Explicitly exclude:**
@@ -25,15 +25,15 @@ Create a self-contained, single-page HTML application that allows a user to uplo
 
     **🔥 CRITICAL: Use the specified library versions and CDN links below.**
 
-    **✅ VERIFIED: @huggingface/transformers v3.7.2 supports `return_timestamps: 'word'` parameter for word-level timestamp extraction.**
+    **✅ VERIFIED: Whisper.cpp WASM supports granular timestamps with `--max-len 1` parameter (segments ~1 word each, not true word-level like transformers.js).**
 
     **⚠️ REQUIRED CDN LINKS:**
 
     | Library | Version | CDN Link | Status | Plugins |
     |---------|---------|----------|--------|---------|
-    | @huggingface/transformers | v3.7.2 | `https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js` | ✅ Verified | N/A |
-    | WaveSurfer.js | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js` | ✅ Verified | Regions Plugin |
-    | Regions Plugin | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js` | ✅ Verified | N/A |
+    | whisper.cpp WASM | v1.0.3 | `https://cdn.jsdelivr.net/npm/whisper.cpp@1.0.3/whisper.js` | ✅ Verified | N/A |
+    | WaveSurfer.js | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js` | ✅ Verified | Regions Plugin |
+    | Regions Plugin | v7.10.1 | `https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js` | ✅ Verified | N/A |
     | lamejs | v1.2.0 | `https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.all.js` | ✅ Verified | N/A |
     | JSZip | v3.10.1 | `https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js` | ✅ Verified | N/A |
 
@@ -41,8 +41,8 @@ Create a self-contained, single-page HTML application that allows a user to uplo
     - `@breezystack/lamejs@1.2.7` - Returns 404 error
     - Any `@breezystack/lamejs` versions - Package does not exist
 
-    *   **Audio Transcription:** Use **@huggingface/transformers v3.7.2** (latest stable) with `Xenova/whisper-tiny` model for maximum client-side performance and reduced initial load time. Import via official CDN: `import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js'`
-    *   **Waveform Visualization:** Use **WaveSurfer.js v7.10.1** (latest) with the Regions plugin for extraction marker visualization. Import both as ES modules: `import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'` and `import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'`
+    *   **Audio Transcription:** Use **whisper.cpp WASM v1.0.3** with `ggml-small` model for better accuracy and performance. Load via CDN: `<script src="https://cdn.jsdelivr.net/npm/whisper.cpp@1.0.3/whisper.js"></script>`
+    *   **Waveform Visualization:** Use **WaveSurfer.js v7.10.1** (latest) with the Regions plugin for extraction marker visualization. Load via CDN: `<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>` and `<script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>`
     *   **MP3 Encoding:** Use **lamejs v1.2.0** (stable version) via CDN: `<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.all.js"></script>`
         *   **CRITICAL - Library Loading Verification:** The lamejs library must be properly loaded and accessible before MP3 encoding. Add defensive checks to verify library availability:
             ```javascript
@@ -190,34 +190,35 @@ The application should have four distinct states:
         *   **Step 3 - Create Transcription Buffer:** Generate a separate 16kHz mono version from the extracted original buffer for AI transcription processing, without modifying the original buffer.
 
 *   **Audio Transcription (First Stage):**
-    *   Configure the environment and initialize the transcriber:
+    *   Initialize the Whisper.cpp WASM transcriber:
         ```javascript
-        env.allowRemoteModels = true;
-        env.allowLocalModels = false;
-        console.log('Initializing transcription model: Xenova/whisper-tiny');
-        const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', { device: 'webgpu', dtype: 'q4' });
+        // Initialize Whisper.cpp WASM
+        console.log('Initializing Whisper.cpp WASM with ggml-small model');
+        const whisperInstance = await Module.init({
+            model: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin'
+        });
         ```
     *   **Memory-Efficient Audio Processing (For Transcription Only):**
         *   **CRITICAL:** Process transcription audio from the extracted `originalBuffer` obtained via `wavesurfer.getDecodedData()`
         *   **Implementation Strategy:**
             ```javascript
-            // Create transcription-specific AudioContext
+            // Whisper.cpp WASM expects 16kHz mono PCM data
             const transcriptionContext = new AudioContext({sampleRate: 16000});
 
             // Resample original buffer to 16kHz for transcription
             const transcriptionBuffer = await resampleBuffer(originalBuffer, 16000);
 
-            // Convert to mono if needed: (left + right) / 2
-            const monoBuffer = convertToMono(transcriptionBuffer);
+            // Convert to mono Float32Array for Whisper.cpp
+            const monoFloat32 = convertToMonoFloat32(transcriptionBuffer);
             ```
         *   Process transcription audio in 30-second chunks with streaming approach
         *   **Memory Management:** Original buffer remains in WaveSurfer, transcription buffers are cleared after each chunk
         *   **Timestamp Synchronization:** Account for sample rate differences when mapping word timestamps back to original audio
-    *   **🔥 MANDATORY: Audio Data Format Conversion:** Before passing audio data to the transcriber, the AudioBuffer MUST be converted to Float32Array format. The Hugging Face Transformers.js library expects Float32Array input, not AudioBuffer objects. Failure to convert will result in "e.subarray is not a function" errors.
+    *   **🔥 MANDATORY: Audio Data Format Conversion:** Before passing audio data to Whisper.cpp WASM, the AudioBuffer MUST be converted to Float32Array format. Whisper.cpp expects 16kHz mono Float32Array input.
 
         **IMPLEMENTATION REQUIREMENT:** This conversion function MUST be implemented exactly as shown:
         ```javascript
-        // REQUIRED: Convert AudioBuffer to Float32Array for transcription
+        // REQUIRED: Convert AudioBuffer to Float32Array for Whisper.cpp
         function audioBufferToFloat32Array(audioBuffer) {
             // For mono audio, extract the first channel
             if (audioBuffer.numberOfChannels === 1) {
@@ -244,11 +245,11 @@ The application should have four distinct states:
         if (!(audioData instanceof Float32Array)) {
             throw new Error('Audio data must be Float32Array for transcription');
         }
-        const result = await transcriber(audioData, transcriptionOptions);
+        const result = await whisperInstance.transcribe(audioData, { maxLen: 1 });
         ```
-    *   **CRITICAL - Accuracy Settings:** Invoke the transcriber with: `language: 'english'`, `task: 'transcribe'`, `chunk_length_s: 30`, `stride_length_s: 5`, `return_timestamps: 'word'`. Use 30-second chunk streaming processing for all files.
-    *   **CRITICAL - Word-Level Timestamp Handling:** The transcription process must be configured to return detailed timestamp data for each transcribed word. The `return_timestamps: 'word'` parameter must guarantee that the output includes a word-level data array containing objects with individual word text and timestamp ([start, end]) pairs.
-    *   **CRITICAL - Progressive Transcription:** Use the `progress_callback` parameter to:
+    *   **CRITICAL - Accuracy Settings:** Invoke Whisper.cpp with: `language: 'en'`, `translate: false`, `maxLen: 1`, `maxSegmentLength: 30`. Use 30-second chunk streaming processing for all files.
+    *   **CRITICAL - Word-Level Timestamp Handling:** The transcription process must be configured to return detailed timestamp data for each transcribed word. The `maxLen: 1` parameter creates granular segments (~1 word each) that provide word-level timing data with start/end timestamp pairs.
+    *   **CRITICAL - Progressive Transcription:** Use progress callbacks to:
         1.  Update the UI progress indicator in real-time
         2.  Append word-level transcription data to a global `wordTimestamps` array
         3.  Display partial transcription text as it becomes available
@@ -510,47 +511,43 @@ The system MUST validate all timestamps from transcription models and automatica
 
 **7.5. Robust Progress Indicator Handling**
 
-**Context:** The application relies on the `progress_callback` function from the Hugging Face Transformers.js library to provide real-time feedback during model initialization. This callback is asynchronous and its data structure is not guaranteed to be consistent across all events.
+**Context:** The application relies on progress callbacks from Whisper.cpp WASM to provide real-time feedback during model loading and transcription. The callback is straightforward and passes a simple numeric percentage.
 
-**Problem Statement:** The `progress_callback` sends different types of updates:
-*   **File Download Progress:** `{ status: 'progress', name: 'model.bin', progress: 55.6789 }`
-*   **Status Change:** `{ status: 'done', name: 'model.bin' }` or `{ status: 'initializing' }`
+**Problem Statement:** The progress callback sends percentage updates:
+*   **Model Loading/Transcription Progress:** Simple numeric value from 0 to 100
+*   **Calculation:** `(100*(seek - seek_start))/(seek_end - seek_start)`
 
-Assuming a fixed data structure can lead to unhandled exceptions when accessing undefined properties.
+The callback is simple but defensive checks are still recommended for robust error handling.
 
 **Functional Requirements:**
 
-*   **Defensive Data Access:** The `progress_callback` handler MUST NOT assume the existence of the numerical `progress` property on the event object. All access to this property must be conditional.
+*   **Defensive Data Access:** The progress callback handler should validate that the percentage parameter is a valid number.
 
-*   **Type Validation:** Before attempting to perform any number-specific operations (like `.toFixed()`) on the `progress` property, the code MUST first execute a check to verify that the property both exists and is of type `number`.
+*   **Type Validation:** Before attempting to perform any number-specific operations (like `Math.round()`) on the percentage, the code should verify that the parameter is of type `number`.
 
-*   **Differentiated UI Updates:** The user-facing status message must intelligently adapt to the information provided:
-    *   **When numerical `progress` property is present:** Display both status and formatted percentage
-        *   Example: `"Downloading model... (45.50%)"`
-    *   **When numerical `progress` property is absent:** Display only status text without percentage
-        *   Example: `"Initializing model..."` or `"Download complete"`
+*   **Adaptive UI Updates:** The user-facing status message should display the percentage if it's possible and if it's a convenient and performant way to get this info:
+    *   **When percentage is available:** `"Processing audio... 45%"`
+    *   **When percentage is not available:** `"Processing audio..."`
 
-*   **Zero-Crash Guarantee:** The implementation must prevent any `TypeError` or unhandled runtime exceptions, regardless of the data structure passed by the Transformers.js library.
+*   **Zero-Crash Guarantee:** The implementation must prevent any `TypeError` or unhandled runtime exceptions, regardless of the data passed by the Whisper.cpp WASM library.
 
 **Required Implementation Pattern:**
 ```javascript
-function handleProgressCallback(progress) {
-    let statusText = `Initializing Model... ${progress.status}`;
+function handleProgressCallback(percentage) {
+    let statusText = 'Processing audio...';
 
-    // CRITICAL: Defensive check before accessing progress.progress
-    if (typeof progress.progress === 'number') {
-        const percent = progress.progress.toFixed(2);
-        statusText += ` (${percent}%)`;
+    // CRITICAL: Defensive check before using percentage
+    if (typeof percentage === 'number' && percentage >= 0 && percentage <= 100) {
+        statusText = `Processing audio... ${Math.round(percentage)}%`;
     }
 
     updateStatus(statusText);
 }
 
-// Usage in transcriber initialization
-const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-    device: 'webgpu',
-    dtype: 'q4',
-    progress_callback: handleProgressCallback
+// Usage in whisper.cpp WASM initialization
+const whisperInstance = await Module.init({
+    model: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin',
+    onProgress: handleProgressCallback
 });
 ```
 
@@ -608,9 +605,12 @@ All implementations MUST be tested with the complete workflow to ensure no regre
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Audio Transcription & Segmentation Tool</title>
 
-    <!-- Load utility libraries via CDN (available globally) -->
+    <!-- Load all libraries via CDN (available globally) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/lame.all.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.all.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/whisper.cpp@1.0.3/whisper.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.min.js"></script>
 </head>
 <body>
     <div id="app">
@@ -622,17 +622,11 @@ All implementations MUST be tested with the complete workflow to ensure no regre
         <div id="downloads"></div>
     </div>
 
-    <script type="module">
-        // Import modern libraries as ES modules
-        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js';
-        import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js';
-        import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js';
+    <script>
+        // All libraries are now available globally
+        // Global libraries (JSZip, lamejs, WhisperCpp, WaveSurfer) are available
 
-        // Main application logic here
-        // Global libraries (JSZip, lamejs, WaveSurfer) are available
-        // ES module imports are handled automatically
-
-        let transcriber, wavesurfer, regions;
+        let whisperInstance, wavesurfer, regions;
 
         // Simple error handling function
         function showError(message) {
@@ -662,6 +656,16 @@ All implementations MUST be tested with the complete workflow to ensure no regre
                     throw new Error('JSZip library not loaded. Please check CDN connection.');
                 }
 
+                // Check Whisper.cpp WASM availability
+                if (typeof Module === 'undefined') {
+                    throw new Error('Whisper.cpp WASM library not loaded. Please check CDN connection.');
+                }
+
+                // Check WaveSurfer availability
+                if (typeof WaveSurfer === 'undefined') {
+                    throw new Error('WaveSurfer library not loaded. Please check CDN connection.');
+                }
+
                 // REQUIRED: Log successful verification
                 console.log('All CDN libraries verified successfully');
 
@@ -677,22 +681,14 @@ All implementations MUST be tested with the complete workflow to ensure no regre
 
                 console.log('lamejs Mp3Encoder functionality verified');
 
-                // Configure environment for remote model loading
-                env.allowRemoteModels = true;
-                env.allowLocalModels = false;
-
-                // Initialize AI model with WebGPU fallback to CPU
-                let device = 'webgpu';
-                try {
-                    // Test WebGPU availability
-                    if (!navigator.gpu) device = 'cpu';
-                } catch {
-                    device = 'cpu';
-                }
-
-                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
-                    device: device,
-                    dtype: device === 'webgpu' ? 'q4' : 'fp32'
+                // Initialize Whisper.cpp WASM instance
+                whisperInstance = await Module.init({
+                    model: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin',
+                    onProgress: (progress) => {
+                        if (typeof progress === 'number' && progress >= 0 && progress <= 100) {
+                            console.log(`Loading model... ${Math.round(progress)}%`);
+                        }
+                    }
                 });
 
                 // Initialize WaveSurfer with complete configuration
@@ -706,7 +702,7 @@ All implementations MUST be tested with the complete workflow to ensure no regre
                 });
 
                 // Initialize Regions plugin with proper registration
-                regions = wavesurfer.registerPlugin(Regions.create({
+                regions = wavesurfer.registerPlugin(WaveSurfer.Regions.create({
                     dragSelection: false // Prevent accidental region creation
                 }));
 
@@ -735,9 +731,9 @@ All implementations MUST be tested with the complete workflow to ensure no regre
 ```
 
 **Key Features:**
-- **Script Loading** - CDN for globals, ES modules for libraries
+- **Script Loading** - CDN for all libraries loaded as globals
 - **Verified library versions** with specific version numbers for stability
-- **API Usage** - WaveSurfer Regions plugin, WebGPU with CPU fallback
+- **API Usage** - WaveSurfer Regions plugin, Whisper.cpp WASM transcription
 - **Comprehensive error handling** structure for robust initialization and processing
 - **Memory-optimized processing** - chunked processing, progressive cleanup, 1GB memory management
-- **Performance optimizations** - 4-bit quantization, WebGPU acceleration, Web Audio API resampling
+- **Performance optimizations** - WASM acceleration, Web Audio API resampling

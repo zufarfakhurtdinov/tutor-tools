@@ -50,7 +50,7 @@ The evaluation workflow (`eval-workflow-sequential.js`) is the definitive author
 
 - **Single File Application**: All functionality contained in `index.html`
 - **Client-Side Processing**: Uses WebGPU/CPU with Whisper AI model for transcription
-- **Libraries**: WaveSurfer.js (audio visualization), Transformers.js (AI), lamejs (MP3 encoding), JSZip (archiving)
+- **Libraries**: WaveSurfer.js (audio visualization), Whisper.cpp WASM (AI transcription), lamejs (MP3 encoding), JSZip (archiving)
 - **Audio Processing**: 30-second chunked processing with memory management
 
 ## Key Files
@@ -88,3 +88,5 @@ The evaluation workflow provides comprehensive validation across 10 different au
 - Any temporal comparisons or value judgments between versions/approaches
 
 Instead, describe functionality objectively and factually without comparisons.
+
+**CRITICAL**: NEVER truncate or cut strings in debug logs or console output. Always log complete strings without using .substring(), .slice(), or similar truncation methods. Full string logging is essential for debugging and analysis.

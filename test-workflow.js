@@ -33,7 +33,9 @@ function createServer() {
                 } else {
                     res.writeHead(200, {
                         'Content-Type': contentType,
-                        'Access-Control-Allow-Origin': '*'
+                        'Access-Control-Allow-Origin': '*',
+                        'Cross-Origin-Embedder-Policy': 'credentialless',
+                        'Cross-Origin-Opener-Policy': 'same-origin'
                     });
                     res.end(content, 'utf-8');
                 }
@@ -63,6 +65,9 @@ async function testAudioWorkflow() {
     });
 
     const page = await context.newPage();
+
+    // Set page timeout to 5 minutes for long transcription operations
+    page.setDefaultTimeout(300000); // 5 minutes
 
     // Collect console logs and errors
     const consoleLogs = [];
@@ -194,9 +199,9 @@ async function testAudioWorkflow() {
 
         // Verify expected number of segments for KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3 (contains "1, 2, 3, 4, 5, 6")
         if (downloadButtons !== 6) {
-            console.log(`⚠️ Expected 6 download buttons for KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3, found ${downloadButtons}`);
-            console.log(`   This may indicate issues with number detection or segmentation algorithm`);
+            throw new Error(`Expected 6 segments for KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3, found ${downloadButtons}. Segment extraction failed.`);
         }
+        console.log('✅ Correct number of segments found: 6');
 
         // Check that ZIP download button is available
         const zipButton = page.locator('button:has-text("Download All as ZIP")');
@@ -207,10 +212,15 @@ async function testAudioWorkflow() {
         await page.waitForTimeout(10000);
 
         const criticalErrors = errors.filter(err =>
+            err.trim().length > 0 && // Filter out empty strings
             !err.includes('Unable to determine content-length') &&
             !err.includes('404 (Not Found)') && // Harmless resource requests
             !err.includes('VerifyEachNodeIsAssignedToAnEp') && // ONNX optimization warnings
-            !err.includes('session_state.cc') // ONNX runtime warnings
+            !err.includes('session_state.cc') && // ONNX runtime warnings
+            !err.includes('whisper_init_') && // Whisper.cpp initialization logs
+            !err.includes('whisper_model_load') && // Whisper.cpp model loading logs
+            !err.includes('whisper_backend_') && // Whisper.cpp backend logs
+            !err.includes('whisper_print_timings') // Whisper.cpp timing logs
         );
 
         if (criticalErrors.length > 0) {

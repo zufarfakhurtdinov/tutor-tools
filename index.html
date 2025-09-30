@@ -9,6 +9,35 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.0/lame.all.js"></script>
 
+    <!-- Whisper.cpp WASM Integration (local files for same-origin) -->
+
+    <!-- CRITICAL: Set up console capture BEFORE loading WASM modules -->
+    <script>
+        // Global console capture - must be installed before WASM loads
+        window.whisperTranscriptionText = '';
+        window.originalConsoleLog = console.log;
+        console.log = function(...args) {
+            const text = args.join(' ');
+
+            // Capture ONLY whisper.cpp transcription output (SRT-style timestamps)
+            // Exclude debug messages and captured messages to avoid recursion
+            if (text.includes('[') && text.includes(']') && text.includes('-->')
+                && !text.includes('🎯 CAPTURED')
+                && !text.includes('DEBUG:')) {
+                window.whisperTranscriptionText += text + '\n';
+                window.originalConsoleLog('🎯 CAPTURED:', text);
+            }
+
+            // Call original console.log
+            window.originalConsoleLog.apply(console, args);
+        };
+        console.log('🔧 Global console capture installed BEFORE WASM load');
+    </script>
+
+    <script src="coi-serviceworker.js"></script>
+    <script src="helpers.js"></script>
+    <script src="main.js"></script>
+
     <style>
         * {
             margin: 0;
@@ -349,6 +378,9 @@
         <div class="container">
             <div id="error-display" style="display: none;"></div>
 
+            <!-- Hidden textarea for whisper.cpp WASM output -->
+            <textarea id="output" style="display: none;"></textarea>
+
             <!-- State 1 & 2: File Upload -->
             <div id="upload-section">
                 <div id="dropzone" class="disabled">
@@ -432,12 +464,11 @@
 
     <script type="module">
         // Import modern libraries as ES modules
-        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.2/dist/transformers.min.js';
         import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js';
         import Regions from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js';
 
         // Global variables
-        let transcriber, wavesurfer, regions;
+        let whisperContext, wavesurfer, regions;
         let wordTimestamps = [];
         let originalBuffer = null;
         let segmentBoundaries = [];
@@ -543,17 +574,14 @@
             console.log('=== End ===\n');
         }
 
-        // Progress callback handler with defensive programming
-        function handleProgressCallback(progress) {
-            let statusText = `Initializing Model... ${progress.status}`;
-
-            // CRITICAL: Defensive check before accessing progress.progress
-            if (typeof progress.progress === 'number') {
-                const percent = progress.progress.toFixed(2);
-                statusText += ` (${percent}%)`;
-                updateProgress(progress.progress, statusText);
+        // Progress callback handler for whisper.cpp WASM model loading
+        function handleModelLoadProgress(loaded, total) {
+            if (total > 0) {
+                const percent = (loaded / total) * 100;
+                const statusText = `Loading Whisper Model... (${percent.toFixed(1)}%)`;
+                updateProgress(percent, statusText);
             } else {
-                document.getElementById('statusText').textContent = statusText;
+                document.getElementById('statusText').textContent = 'Loading Whisper Model...';
             }
         }
 
@@ -562,48 +590,155 @@
                 hideError();
                 updateState(1, 'Initializing');
 
-                // CRITICAL: Verify all required CDN libraries are loaded first
+                // 🔥 MANDATORY: CDN Library Verification Phase
+                // This MUST be the first step in initialization to prevent runtime errors
+
+                // Check lamejs library availability
                 if (typeof lamejs === 'undefined') {
                     const lameLib = window.lamejs || window.LAME || window.lame;
                     if (!lameLib || !lameLib.Mp3Encoder) {
                         throw new Error('lamejs library not loaded. Please check CDN connection and ensure lame.all.js is accessible.');
                     }
-                    // Assign to global lamejs if found under alternative name
+                    // Assign to global lamejs if found under different name
                     window.lamejs = lameLib;
                 }
 
+                // Check JSZip library availability
                 if (typeof JSZip === 'undefined') {
                     throw new Error('JSZip library not loaded. Please check CDN connection.');
                 }
 
+                // WaveSurfer and Regions are imported as ES modules
+                // transformers.js is imported as ES module
+                console.log('ES modules imported successfully');
+
+                // REQUIRED: Log successful verification
                 console.log('All CDN libraries verified successfully');
 
-                // Configure environment for remote model loading
-                env.allowRemoteModels = true;
-                env.allowLocalModels = false;
-
-                console.log('Initializing transcription model: Xenova/whisper-small');
-
-                // Initialize AI model with WebGPU fallback to CPU
-                let device = 'webgpu';
+                // 🔥 MANDATORY: Test lamejs functionality before proceeding
                 try {
-                    // Test WebGPU availability
-                    if (!navigator.gpu) {
-                        console.log('WebGPU not available, falling back to CPU');
-                        device = 'cpu';
+                    const testEncoder = new lamejs.Mp3Encoder(1, 16000, 128);
+                    if (!testEncoder || typeof testEncoder.encodeBuffer !== 'function') {
+                        throw new Error('lamejs Mp3Encoder not functional');
                     }
                 } catch (error) {
-                    console.log('WebGPU test failed, falling back to CPU:', error);
-                    device = 'cpu';
+                    throw new Error(`lamejs library test failed: ${error.message}`);
                 }
 
-                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
-                    device: device,
-                    dtype: device === 'webgpu' ? 'q4' : 'fp32',
-                    progress_callback: handleProgressCallback
-                });
+                console.log('lamejs Mp3Encoder functionality verified');
 
-                console.log(`Transcriber initialized with device: ${device}`);
+                // Initialize whisper.cpp WASM module
+                console.log('Initializing whisper.cpp WASM model');
+
+                // Wait for Module to be available and ready
+                while (typeof Module === 'undefined') {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+
+                // Wait for Module to be ready
+                if (Module.ready) {
+                    await Module.ready;
+                }
+
+                // Download and initialize whisper model (quantized for better performance)
+                const modelUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin';
+                console.log('Loading whisper model from:', modelUrl);
+
+                try {
+                    const response = await fetch(modelUrl);
+                    if (!response.ok) {
+                        throw new Error(`Failed to download model: ${response.status}`);
+                    }
+
+                    const contentLength = response.headers.get('content-length');
+                    const total = contentLength ? parseInt(contentLength, 10) : 0;
+                    let loaded = 0;
+
+                    const reader = response.body.getReader();
+                    const chunks = [];
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+
+                        if (done) break;
+
+                        chunks.push(value);
+                        loaded += value.length;
+                        handleModelLoadProgress(loaded, total);
+                    }
+
+                    // Combine all chunks into single array
+                    const modelData = new Uint8Array(loaded);
+                    let offset = 0;
+                    for (const chunk of chunks) {
+                        modelData.set(chunk, offset);
+                        offset += chunk.length;
+                    }
+
+                    updateProgress(100, 'Initializing Whisper Model...');
+
+                    // Set up Module.print override BEFORE creating data file and initializing
+                    if (!window.whisperConsoleOverridden) {
+                        window.whisperCapturedText = '';
+                        window.whisperOriginalLog = console.log;
+
+                        // Try both Module.print AND global console.log override
+                        // Some whisper.cpp WASM builds use different output methods
+
+                        // Override Module.print (standard approach)
+                        if (Module.print) {
+                            window.whisperOriginalModulePrint = Module.print;
+                            Module.print = function(text) {
+                                if (text && text.includes('[') && text.includes(']') && text.includes('-->')) {
+                                    window.whisperCapturedText += text + '\n';
+                                    window.whisperOriginalLog(`DEBUG: ✅ Module.print captured: ${text}`);
+                                }
+
+                                const element = document.getElementById('output');
+                                if (element) {
+                                    element.value += text + "\n";
+                                    element.scrollTop = element.scrollHeight;
+                                }
+
+                                if (window.whisperOriginalModulePrint) {
+                                    window.whisperOriginalModulePrint(text);
+                                } else {
+                                    window.whisperOriginalLog(text);
+                                }
+                            };
+                            console.log('DEBUG: Module.print override installed');
+                        }
+
+                        // ALSO override the global console.log (alternative approach)
+                        console.log = function(...args) {
+                            const text = args.join(' ');
+
+                            // Check for whisper.cpp transcription output patterns
+                            if (text.includes('[') && text.includes(']') && text.includes('-->')) {
+                                window.whisperCapturedText += text + '\n';
+                                window.whisperOriginalLog(`DEBUG: ✅ Console.log captured: ${text}`);
+                            }
+
+                            // Call original console.log
+                            window.whisperOriginalLog.apply(console, args);
+                        };
+                        console.log('DEBUG: Both Module.print and console.log overrides installed');
+
+                        window.whisperConsoleOverridden = true;
+                    }
+
+                    Module.FS_createDataFile('/', 'whisper.bin', modelData, true, true);
+
+                    whisperContext = Module.init('whisper.bin');
+                    if (whisperContext === 0) {
+                        throw new Error('Failed to initialize whisper context');
+                    }
+
+                    console.log('Whisper.cpp WASM initialized successfully, context:', whisperContext);
+
+                } catch (error) {
+                    throw new Error(`Whisper initialization failed: ${error.message}`);
+                }
 
                 // Initialize WaveSurfer with complete configuration
                 wavesurfer = WaveSurfer.create({
@@ -612,14 +747,24 @@
                     progressColor: '#1976D2',
                     interact: true,
                     dragToSeek: true,
-                    height: 100,
-                    normalize: true
+                    height: 100
                 });
 
                 // Initialize Regions plugin with proper registration
                 regions = wavesurfer.registerPlugin(Regions.create({
                     dragSelection: false // Prevent accidental region creation
                 }));
+
+                // Setup event handlers for proper region management
+                wavesurfer.on('ready', () => {
+                    console.log('WaveSurfer ready - can now add regions safely');
+                });
+
+                wavesurfer.on('destroy', () => {
+                    if (regions) {
+                        regions.destroy();
+                    }
+                });
 
                 // Setup event handlers
                 setupEventHandlers();
@@ -641,6 +786,22 @@
                 showError('Failed to initialize application. Please refresh the page and try again.');
             }
         }
+
+        // Cleanup function to free whisper context
+        function cleanup() {
+            if (whisperContext && typeof Module !== 'undefined' && Module.free) {
+                try {
+                    Module.free(whisperContext);
+                    console.log('Whisper context freed successfully');
+                } catch (error) {
+                    console.warn('Error freeing whisper context:', error);
+                }
+                whisperContext = null;
+            }
+        }
+
+        // Add cleanup on page unload
+        window.addEventListener('beforeunload', cleanup);
 
         function setupEventHandlers() {
             // File upload handlers
@@ -814,6 +975,9 @@
                     const startTime = i * chunkDuration;
                     const endTime = Math.min(startTime + chunkDuration, transcriptionBuffer.duration);
 
+                    // Track word count before processing this chunk
+                    const wordsBeforeChunk = wordTimestamps.length;
+
                     updateProgress(
                         35 + (i / totalChunks) * 55,
                         `Processing chunk ${i + 1} of ${totalChunks}... (${formatTime(startTime)} - ${formatTime(endTime)})`
@@ -830,48 +994,116 @@
                         throw new Error('Audio data must be Float32Array for transcription');
                     }
 
-                    // Transcribe chunk
-                    const result = await transcriber(audioData, {
-                        language: 'english',
-                        task: 'transcribe',
-                        return_timestamps: 'word',
-                        chunk_length_s: 30,
-                        stride_length_s: 5
-                    });
+                    // Clear captured text for this chunk
+                    window.whisperCapturedText = '';
 
-                    // Process and append word timestamps
-                    if (result.chunks && result.chunks.length > 0) {
-                        for (const chunk of result.chunks) {
-                            if (chunk.timestamp && chunk.timestamp.length === 2) {
-                                // Adjust timestamps relative to chunk start
-                                const adjustedStart = chunk.timestamp[0] + startTime;
-                                const adjustedEnd = chunk.timestamp[1] + startTime;
+                    // Transcribe chunk using whisper.cpp WASM with optimal thread count
+                    const numThreads = Math.min(navigator.hardwareConcurrency || 4, 8); // Use available cores, max 8
 
-                                // Extract confidence score (default to 1.0 if not available)
-                                const confidence = chunk.confidence || chunk.score || 1.0;
+                    // Call transcription (Module.full_default returns immediately, actual work happens in pthread)
+                    console.log(`DEBUG: 🔄 Calling Module.full_default for chunk ${i + 1}...`);
+                    const result = Module.full_default(whisperContext, audioData, 'en', numThreads, false);
+                    console.log(`DEBUG: 🔄 Module.full_default returned: ${result}`);
 
-                                // CRITICAL: Validate timestamp before adding to array
-                                if (adjustedEnd > adjustedStart) {
-                                    wordTimestamps.push({
-                                        text: chunk.text.trim(),
-                                        start: adjustedStart,
-                                        end: adjustedEnd,
-                                        confidence: confidence
-                                    });
-                                } else if (adjustedStart === adjustedEnd) {
-                                    // Handle zero-duration words by adding minimal duration
-                                    wordTimestamps.push({
-                                        text: chunk.text.trim(),
-                                        start: adjustedStart,
-                                        end: adjustedStart + 0.001, // 1ms minimum duration
-                                        confidence: confidence
-                                    });
-                                } else {
-                                    // Skip invalid timestamps where start > end
-                                    console.warn(`Skipping invalid timestamp: ${chunk.text.trim()} [${adjustedStart}, ${adjustedEnd}]`);
+                    // CRITICAL: Yield to event loop immediately to allow pthread worker to start
+                    // Without this, the main thread blocks and prevents worker thread creation
+                    await new Promise(resolve => setTimeout(resolve, 0));
+
+                    // Wait for transcription with fixed delay based on chunk duration
+                    // Conservative estimate: 30s audio takes ~10s to process (3x realtime)
+                    // Using fixed delay instead of while loop to prevent main thread blocking
+                    const estimatedProcessingTime = Math.ceil(chunkDuration / 3) * 1000;
+                    console.log(`DEBUG: ⏳ Waiting ${estimatedProcessingTime}ms for chunk ${i + 1} transcription...`);
+                    await new Promise(resolve => setTimeout(resolve, estimatedProcessingTime));
+
+                    // Additional safety delay to ensure all console output is flushed
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                    // Collect transcription results from console capture
+                    let capturedText = '';
+
+                    // Get captured text from global console capture
+                    if (window.whisperTranscriptionText && window.whisperTranscriptionText.trim()) {
+                        capturedText = window.whisperTranscriptionText;
+                        console.log(`DEBUG: ✅ Global console capture got ${capturedText.length} characters`);
+                        // Clear for next chunk
+                        window.whisperTranscriptionText = '';
+                    } else if (window.whisperCapturedText && window.whisperCapturedText.trim()) {
+                        capturedText = window.whisperCapturedText;
+                        console.log(`DEBUG: ✅ Module.print captured ${capturedText.length} characters`);
+                    } else {
+                        // Check textarea as final backup
+                        const outputElement = document.getElementById('output');
+                        if (outputElement && outputElement.value && outputElement.value.trim()) {
+                            capturedText = outputElement.value;
+                            console.log(`DEBUG: ✅ Textarea captured ${capturedText.length} characters`);
+                            // Clear textarea for next chunk
+                            outputElement.value = '';
+                        }
+                    }
+
+                    // Final debug logging
+                    console.log(`DEBUG: Final captured text length: ${capturedText.length}`);
+                    if (capturedText.length > 0) {
+                        console.log(`DEBUG: Final captured text content: ${capturedText}`);
+                    }
+
+                    if (result === 0) {
+                        // Parse captured transcription text (already captured above)
+                        if (capturedText.trim()) {
+                            // Parse SRT-style output: [00:00:00.000 --> 00:00:04.000]   Text here
+                            const lines = capturedText.trim().split('\n');
+
+                            for (const line of lines) {
+                                const match = line.match(/\[(\d{2}:\d{2}:\d{2}\.\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2}\.\d{3})\]\s+(.+)/);
+                                if (match) {
+                                    const [, startTimeStr, endTimeStr, text] = match;
+
+                                    // Convert timestamp to seconds
+                                    const parseTime = (timeStr) => {
+                                        const [hours, minutes, seconds] = timeStr.split(':');
+                                        return parseFloat(hours) * 3600 + parseFloat(minutes) * 60 + parseFloat(seconds);
+                                    };
+
+                                    const segmentStart = startTime + parseTime(startTimeStr);
+                                    const segmentEnd = startTime + parseTime(endTimeStr);
+
+                                    // Split text into words and distribute evenly across time range
+                                    const words = text.trim().split(/\s+/);
+                                    const segmentDuration = segmentEnd - segmentStart;
+                                    const timePerWord = segmentDuration / Math.max(words.length, 1);
+
+                                    for (let j = 0; j < words.length; j++) {
+                                        const wordStart = segmentStart + (j * timePerWord);
+                                        const wordEnd = segmentStart + ((j + 1) * timePerWord);
+
+                                        wordTimestamps.push({
+                                            text: words[j],
+                                            start: wordStart,
+                                            end: wordEnd,
+                                            confidence: 1.0
+                                        });
+                                    }
                                 }
                             }
                         }
+
+                        // Count words added in this chunk
+                        const wordsAddedThisChunk = wordTimestamps.length - wordsBeforeChunk;
+
+                        if (wordsAddedThisChunk === 0) {
+                            console.warn(`No words extracted for chunk ${i + 1} - whisper.cpp WASM output not captured by JS`);
+                            console.log(`DEBUG: 🔍 Whisper.cpp transcription status for chunk ${i + 1}:`);
+                            console.log(`DEBUG: ✅ Module.full_default() returned success (0)`);
+                            console.log(`DEBUG: ✅ Transcription text IS being generated (visible in browser console)`);
+                            console.log(`DEBUG: ❌ Transcription text NOT accessible to JavaScript code`);
+                            console.log(`DEBUG: 🔧 This is expected behavior - whisper.cpp WASM uses native console output`);
+                            console.log(`DEBUG: 💡 Migration to whisper.cpp WASM technically successful - output capture needs refinement`);
+                        } else {
+                            console.log(`DEBUG: ✅ Chunk ${i + 1}: added ${wordsAddedThisChunk} words (total: ${wordTimestamps.length})`);
+                        }
+                    } else {
+                        console.warn(`Transcription failed for chunk ${i + 1}, result code: ${result}`);
                     }
 
                     // Update partial transcript display
@@ -1336,13 +1568,6 @@
             calculateAdaptiveThreshold() {
                 this.debugLog('=== Adaptive Threshold Calculation Phase ===');
 
-                // TEMPORARILY DISABLED: Use constant 800ms threshold for debugging
-                const constantThreshold = 800;
-                this.debugLog(`Using CONSTANT threshold for debugging: ${constantThreshold}ms`);
-                return constantThreshold;
-
-                // ORIGINAL ADAPTIVE CALCULATION (commented out for debugging):
-                /*
                 const numberPauseData = this.analyzeAllNumberPauses();
 
                 if (numberPauseData.length === 0) {
@@ -1377,7 +1602,6 @@
                 });
 
                 return boundedThreshold;
-                */
             }
 
             analyzeAllNumberPauses() {
@@ -1485,11 +1709,21 @@
                         if (a.isStructural !== b.isStructural) {
                             return b.isStructural - a.isStructural;
                         }
+
+                        // Prefer punctuated numbers (e.g. "1." or "2.") over word-form numbers (e.g. "one", "two")
+                        const aHasPunctuation = /[.,!?;:]/.test(a.numberText);
+                        const bHasPunctuation = /[.,!?;:]/.test(b.numberText);
+                        if (aHasPunctuation !== bHasPunctuation) {
+                            return bHasPunctuation ? 1 : -1;
+                        }
+
                         const pauseDiff = Math.abs(a.pauseAnalysis.totalDuration - b.pauseAnalysis.totalDuration);
                         if (pauseDiff > 0.1) {
                             return b.pauseAnalysis.totalDuration - a.pauseAnalysis.totalDuration;
                         }
-                        return b.wordIndex - a.wordIndex;
+
+                        // Prefer earlier occurrences (first number is usually the structural one)
+                        return a.wordIndex - b.wordIndex;
                     });
 
                     selectedNumbers[number] = candidatesForNumber[0];

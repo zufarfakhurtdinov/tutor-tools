@@ -1,5 +1,7 @@
 # Comprehensive Whisper Model Analysis Logs
 
+**NOTE**: This analysis was performed using transformers.js (Xenova models). The current implementation uses whisper.cpp WASM with whisper-tiny.bin model.
+
 ## Test Configuration
 - **Audio File**: KidsBox_ActivityBook1_Unit2_Page12_Track_06.mp3
 - **Expected Result**: 6 segments (by pauses format)

@@ -261,6 +261,15 @@ async function testAudioWorkflow() {
         return false;
 
     } finally {
+        // Save console logs to file
+        const logFileName = 'test-workflow-output.log';
+        const logContent = consoleLogs.map(log =>
+            `[${log.timestamp}] [${log.type.toUpperCase()}] ${log.text}`
+        ).join('\n');
+
+        fs.writeFileSync(logFileName, logContent);
+        console.log(`📝 Console logs saved to: ${logFileName}`);
+
         // Keep browser open for 5 seconds to see final state
         console.log('⏳ Keeping browser open for 5 seconds...');
         await page.waitForTimeout(5000);

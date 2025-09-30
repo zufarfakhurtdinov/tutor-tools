@@ -582,7 +582,7 @@
                 env.allowRemoteModels = true;
                 env.allowLocalModels = false;
 
-                console.log('Initializing transcription model: Xenova/whisper-base');
+                console.log('Initializing transcription model: Xenova/whisper-small');
 
                 // Initialize AI model with WebGPU fallback to CPU
                 let device = 'webgpu';
@@ -597,7 +597,7 @@
                     device = 'cpu';
                 }
 
-                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base', {
+                transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
                     device: device,
                     dtype: device === 'webgpu' ? 'q4' : 'fp32',
                     progress_callback: handleProgressCallback
@@ -885,6 +885,45 @@
 
                 console.log(`Transcription complete: ${wordTimestamps.length} words processed`);
 
+                // Detect actual pauses using audio amplitude analysis
+                const detectedPauses = detectAudioPauses(transcriptionBuffer, {
+                    silenceThreshold: 0.01,   // RMS threshold
+                    minPauseDuration: 0.3,    // 300ms minimum pause
+                    windowSize: 0.05          // 50ms analysis window
+                });
+
+                console.log('\n=== Audio-Based Pause Detection ===');
+                console.log(`Detected ${detectedPauses.length} pauses using amplitude analysis`);
+                console.log('Silence threshold: 0.01 RMS, Min pause: 300ms, Window: 50ms\n');
+
+                detectedPauses.forEach((pause, index) => {
+                    console.log(`Pause ${index + 1}: ${pause.start.toFixed(2)}s - ${pause.end.toFixed(2)}s (duration: ${(pause.duration * 1000).toFixed(0)}ms)`);
+                });
+
+                console.log('\n=== Comparing with Word-Based Pauses ===');
+                // Find significant pauses between words (>600ms)
+                const wordBasedPauses = [];
+                for (let i = 0; i < wordTimestamps.length - 1; i++) {
+                    const pause = wordTimestamps[i + 1].start - wordTimestamps[i].end;
+                    if (pause >= 0.6) {  // 600ms threshold
+                        wordBasedPauses.push({
+                            start: wordTimestamps[i].end,
+                            end: wordTimestamps[i + 1].start,
+                            duration: pause,
+                            beforeWord: wordTimestamps[i].text,
+                            afterWord: wordTimestamps[i + 1].text
+                        });
+                    }
+                }
+
+                console.log(`Found ${wordBasedPauses.length} word-based pauses (>600ms):\n`);
+                wordBasedPauses.forEach((pause, index) => {
+                    console.log(`Word Pause ${index + 1}: ${pause.start.toFixed(2)}s - ${pause.end.toFixed(2)}s (${(pause.duration * 1000).toFixed(0)}ms)`);
+                    console.log(`  After: "${pause.beforeWord}" | Before: "${pause.afterWord}"`);
+                });
+
+                console.log('\n=== End Pause Analysis ===\n');
+
                 // Debug: Log word timestamps with pause visualization (ALL words)
                 logWordTimestampsWithPauses(wordTimestamps);
 
@@ -989,6 +1028,73 @@
             }
 
             return audioData;
+        }
+
+        // Detect pauses in audio by analyzing volume/amplitude
+        function detectAudioPauses(audioBuffer, options = {}) {
+            const {
+                silenceThreshold = 0.01,  // RMS threshold for silence (0-1 scale)
+                minPauseDuration = 0.3,    // Minimum pause duration in seconds
+                windowSize = 0.05          // Analysis window size in seconds
+            } = options;
+
+            const sampleRate = audioBuffer.sampleRate;
+            const audioData = audioBufferToFloat32Array(audioBuffer);
+            const windowSamples = Math.floor(windowSize * sampleRate);
+            const minPauseSamples = Math.floor(minPauseDuration * sampleRate);
+
+            const pauses = [];
+            let silenceStart = null;
+
+            // Analyze audio in windows
+            for (let i = 0; i < audioData.length; i += windowSamples) {
+                const windowEnd = Math.min(i + windowSamples, audioData.length);
+                const window = audioData.slice(i, windowEnd);
+
+                // Calculate RMS (Root Mean Square) for this window
+                let sumSquares = 0;
+                for (let j = 0; j < window.length; j++) {
+                    sumSquares += window[j] * window[j];
+                }
+                const rms = Math.sqrt(sumSquares / window.length);
+
+                const timeSeconds = i / sampleRate;
+
+                if (rms < silenceThreshold) {
+                    // Silence detected
+                    if (silenceStart === null) {
+                        silenceStart = timeSeconds;
+                    }
+                } else {
+                    // Sound detected
+                    if (silenceStart !== null) {
+                        const pauseDuration = timeSeconds - silenceStart;
+                        if (pauseDuration >= minPauseDuration) {
+                            pauses.push({
+                                start: silenceStart,
+                                end: timeSeconds,
+                                duration: pauseDuration
+                            });
+                        }
+                        silenceStart = null;
+                    }
+                }
+            }
+
+            // Handle silence at the end
+            if (silenceStart !== null) {
+                const endTime = audioData.length / sampleRate;
+                const pauseDuration = endTime - silenceStart;
+                if (pauseDuration >= minPauseDuration) {
+                    pauses.push({
+                        start: silenceStart,
+                        end: endTime,
+                        duration: pauseDuration
+                    });
+                }
+            }
+
+            return pauses;
         }
 
         function extractAudioChunk(buffer, startTime, endTime) {
@@ -1315,8 +1421,8 @@
             calculateAdaptiveThreshold() {
                 this.debugLog('=== Adaptive Threshold Calculation Phase ===');
 
-                // TEMPORARILY DISABLED: Use constant 800ms threshold for debugging
-                const constantThreshold = 800;
+                // Use constant 650ms threshold (lowered from 800ms to catch more numbers)
+                const constantThreshold = 650;
                 this.debugLog(`Using CONSTANT threshold for debugging: ${constantThreshold}ms`);
                 return constantThreshold;
 

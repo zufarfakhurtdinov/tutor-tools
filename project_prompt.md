@@ -257,6 +257,25 @@ The application should have four distinct states:
         *   **Note:** Original buffer remains in WaveSurfer's memory (~200-400MB for 80MB file), transcription processing uses additional ~200-400MB per chunk, cleared after processing
     *   Transition to **State 3** showing the complete waveform and transcription.
 
+*   **Timestamp Refinement (Hybrid Algorithm):**
+    *   **Purpose:** Improve word boundary precision by combining Whisper's approximate timestamps with WaveSurfer's amplitude-based silence detection
+    *   **Problem Statement:** Whisper models (especially smaller/quantized variants) provide approximate word timestamps that may not align precisely with actual speech boundaries in the audio, leading to inaccurate pause calculations and imprecise segment extraction
+    *   **Solution Approach:** Use audio amplitude analysis to detect actual silence regions, then align Whisper's word timestamps to these precise boundaries
+    *   **Algorithm Requirements:**
+        *   **Phase 1 - Audio Pause Detection:** Analyze the audio buffer using RMS (Root Mean Square) amplitude detection to identify silence regions with configurable parameters (threshold: 0.01 RMS, minimum pause duration: 100ms, analysis window: 50ms)
+        *   **Phase 2 - Timestamp Alignment:** For each Whisper word timestamp, search within a ±500ms window to find the nearest silence boundary. Align word start times to silence end times (speech begins when silence ends) and word end times to silence start times (speech ends when silence begins)
+        *   **Phase 3 - Validation:** Apply safety checks to ensure refined timestamps maintain chronological ordering, fall within reasonable adjustment limits (max 300ms), and preserve valid duration ranges. If validation fails, fallback to original Whisper timestamps
+    *   **Robustness Features:**
+        *   **No 1:1 Mapping Required:** Algorithm uses proximity-based search rather than requiring equal counts of words and pauses
+        *   **Confidence-Based Refinement:** Only refine timestamps for words with confidence scores above threshold (default: 0.7)
+        *   **Graceful Degradation:** When no suitable silence boundary is found, use original Whisper timestamp without refinement
+        *   **Pause Reuse:** Multiple words can reference the same silence region when appropriate (rapid speech scenarios)
+        *   **Adaptive Parameters:** Adjust search window and silence duration thresholds based on the ratio of detected pauses to transcribed words
+    *   **Implementation Notes:**
+        *   Refinement is optional enhancement - system continues functioning if refinement cannot be applied
+        *   Track and log refinement statistics (percentage of words refined, pauses used, adjustment magnitudes)
+        *   Apply refinement before passing timestamps to AudioSegmentExtractor for segment boundary calculation
+
 *   **Segment Extraction (Second Stage - Triggered by Button Click):**
     *   **CRITICAL - Robust Extraction Logic:** Before attempting to find and extract segments, the code must validate that the `wordTimestamps` variable is a non-empty array. If the model fails to return this word-level data (resulting in undefined or an empty array), the application must not crash. Instead, it should disable the "Extract Segments" button and display a clear, user-friendly error message explaining that the necessary word-level timestamp data could not be generated, and that extraction is therefore not possible.
     *   **User Configuration Interface:** Add an editable input field for pause threshold configuration:
@@ -293,18 +312,30 @@ The application should have four distinct states:
         *   Falls back to pause-based segmentation when insufficient sequential numbers are detected
         *   Provides clear feedback about which detection mode was used
     *   **Multi-Phase Algorithm:**
-        *   **Phase 1 - Adaptive Threshold Calculation:**
-            *   Analyze pause patterns around all numbers in the transcription
-            *   Calculate optimal threshold as 75% of the longest pause duration
-            *   Apply reasonable bounds (100ms - 3000ms) to prevent extreme values
-        *   **Phase 2 - Structural Number Detection:**
-            *   Identify sequential numbers (1, 2, 3... or one, two, three...) with pauses exceeding the adaptive threshold
-            *   Extract phrases between the end of each structural number and start of the next structural number
-            *   Validate phrase segments have minimum duration (500ms) and maximum duration (60 seconds)
-        *   **Phase 3 - Fallback Sequential Detection:**
-            *   If insufficient structural numbers found (< 2), detect any sequential numbers regardless of pause duration
-            *   Create segments containing content between consecutive numbers
-            *   Handle various audio patterns and speaking styles
+        *   **Phase 1 - Collect All Number Occurrences:**
+            *   Scan entire transcription and record every occurrence of numbers 1-99
+            *   For each number occurrence, capture: word index, text, timing (start/end), and pause analysis (before/after)
+            *   Group occurrences by number value (e.g., all occurrences of "1", all occurrences of "2", etc.)
+            *   Calculate structural score for each occurrence using formula: `score = pauseBefore + pauseAfter`
+        *   **Phase 2 - Select Best Occurrence for Each Number:**
+            *   **Single Occurrence:** If a number appears only once, select that occurrence
+            *   **Multiple Occurrences:** If a number appears multiple times, select the occurrence with the highest structural score (longest combined pause duration)
+            *   **Tie-Breaking Rules (applied in order):**
+                1. If total pause scores differ by more than 100ms, select occurrence with higher score
+                2. If scores are similar (within 100ms), prefer occurrence with longer pause after the number (50ms threshold)
+                3. If still tied, select the later occurrence in the transcript
+            *   Log all occurrences with pause data for debugging transparency
+        *   **Phase 3 - Build Sequential Sequence:**
+            *   Starting from number 1, build longest consecutive sequence using selected occurrences
+            *   Allow gaps of up to 2 missing numbers to handle transcription errors
+            *   Stop sequence if gap exceeds 2 consecutive missing numbers
+            *   Sequence must contain at least 1 number to proceed with extraction
+        *   **Phase 4 - Extract Segments:**
+            *   For each number in sequence, define segment boundaries:
+                *   Segment starts at: `numberEndTime + pauseAfter`
+                *   Segment ends at: `nextNumberStartTime - nextPauseBefore`
+                *   For final segment: extend to end of audio
+            *   Validate segment duration is within acceptable range (500ms minimum, 60 seconds maximum)
     *   **Number Recognition (1-99 range):**
         *   **Number Words:** `['one', 'two', 'three', ..., 'twenty', 'twenty-one', ..., 'ninety-nine']`
         *   **Digits:** `['1', '2', '3', ..., '99']`

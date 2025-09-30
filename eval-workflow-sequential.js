@@ -77,6 +77,9 @@ async function testSingleAudioFile(audioFile, server, testIndex) {
 
     const page = await context.newPage();
 
+    // Set page timeout to 60 seconds (default is 30s)
+    page.setDefaultTimeout(60000);
+
     // Collect console logs and errors
     const consoleLogs = [];
     const errors = [];

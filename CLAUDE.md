@@ -79,6 +79,47 @@ When making changes to the application:
 
 The evaluation workflow provides comprehensive validation across 10 different audio files, detecting edge cases and ensuring robust performance across various content types. Sequential processing has proven to be the most reliable approach for this audio processing application.
 
+## Evaluation Report Naming Convention
+
+**CRITICAL**: All evaluation result files must follow this naming pattern:
+
+```
+eval-{model}-{quantization}-{changes}.txt
+```
+
+**Components**:
+- `{model}`: Model name (e.g., `whisper-small`, `distil-small`, `whisper-tiny`)
+- `{quantization}`: Quantization setting (e.g., `q4`, `q8`, `fp32`, `fp16`)
+- `{changes}`: Additional performance changes, abbreviated (e.g., `wasm`, `webgpu`, `cached`, `parallel`)
+
+**Examples**:
+```bash
+# Baseline with WebGPU and q4 quantization
+eval-whisper-small-q4-webgpu.txt
+
+# Distil-Whisper with WASM backend
+eval-distil-small-fp32-wasm.txt
+
+# Tiny model with q8 and caching enabled
+eval-whisper-tiny-q8-wasm-cached.txt
+
+# Multiple changes
+eval-distil-small-fp32-wasm-parallel.txt
+```
+
+**Storage**: All evaluation reports must be saved in the `eval-results/` directory.
+
+**Evaluation History Tracking**:
+After every evaluation run, you MUST update `eval-results/EVALUATION_HISTORY.md` with:
+1. Configuration details (model, quantization, changes)
+2. Link to the detailed results file
+3. Pass rate (e.g., "8/10" or "80%")
+4. Total time required to complete the evaluation
+5. Date of the run
+6. Brief notes about findings
+
+This ensures all optimization attempts are tracked and comparable.
+
 ## Writing Style Guidelines
 
 **CRITICAL**: NEVER use comparison language in project documentation or code comments. Avoid words like:

@@ -47,8 +47,13 @@ function createServer() {
     });
 }
 
-async function testAudioWorkflow() {
+async function testAudioWorkflow(audioFileName) {
+    // Default to Track_26 if no argument provided
+    const defaultFile = 'KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3';
+    const testFile = audioFileName || defaultFile;
+
     console.log('🚀 Starting Playwright test for audio transcription workflow...');
+    console.log(`📁 Testing file: ${testFile}`);
 
     // Start local server
     const server = await createServer();
@@ -114,12 +119,12 @@ async function testAudioWorkflow() {
 
         console.log('✅ No library loading errors detected');
 
-        // Upload the KidsBox audio file using the hidden file input
-        console.log('📤 Uploading KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3 file...');
-        const audioFilePath = path.resolve(__dirname, 'eval', 'KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3');
+        // Upload the audio file using the hidden file input
+        console.log(`📤 Uploading ${testFile}...`);
+        const audioFilePath = path.resolve(__dirname, 'eval', testFile);
 
         if (!fs.existsSync(audioFilePath)) {
-            throw new Error('KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3 file not found');
+            throw new Error(`Audio file not found: ${testFile}`);
         }
 
         // Use the file input directly (it's connected to the dropzone click handler)
@@ -282,7 +287,10 @@ async function testAudioWorkflow() {
 }
 
 // Run the test
-testAudioWorkflow().then(success => {
+// Get audio file from command line argument (e.g., node test-workflow.js Track_39.mp3)
+const audioFileName = process.argv[2];
+
+testAudioWorkflow(audioFileName).then(success => {
     process.exit(success ? 0 : 1);
 }).catch(error => {
     console.error('❌ Test runner error:', error);

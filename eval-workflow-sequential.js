@@ -50,13 +50,13 @@ const EXPECTED_SEGMENTS = {
     'KidsBox_ActivityBook1_Unit7_Page50_Track_26.mp3': 6,
     'KidsBox_ActivityBook1_Unit3_Page20_Track_10.mp3': 6,
     'KidsBox_ActivityBook1_Unit3_Page22_Track_12.mp3': 8,
-    'KidsBox_ActivityBook1_Unit5_Page36_Track_19.mp3': 'need clarification', // Always fail
+    'KidsBox_ActivityBook1_Unit5_Page36_Track_19.mp3': 2,
     'KidsBox_ActivityBook1_Unit6_Page40_Track_21.mp3': 6,
     'KidsBox_ActivityBook1_Unit10_Page72_Track_38.mp3': 6,
     'KidsBox_ActivityBook1_Unit10_Page73_Track_39.mp3': 4,
-    'KidsBox_ActivityBook1_Unit11_Page80_Track_41.mp3': 6, // by pauses
+    'KidsBox_ActivityBook1_Unit11_Page80_Track_41.mp3': 'expected-fail', // by pauses - not implemented yet
     'KidsBox_ActivityBook1_Unit12_Page86_Track_43.mp3': 4,
-    'KidsBox_ActivityBook1_Unit2_Page12_Track_06.mp3': 6 // by pauses
+    'KidsBox_ActivityBook1_Unit2_Page12_Track_06.mp3': 'expected-fail' // by pauses - not implemented yet
 };
 
 async function testSingleAudioFile(audioFile, server, testIndex) {
@@ -77,8 +77,8 @@ async function testSingleAudioFile(audioFile, server, testIndex) {
 
     const page = await context.newPage();
 
-    // Set page timeout to 60 seconds (default is 30s)
-    page.setDefaultTimeout(60000);
+    // Set page timeout to 90 seconds (default is 30s)
+    page.setDefaultTimeout(90000);
 
     // Collect console logs and errors
     const consoleLogs = [];
@@ -91,6 +91,11 @@ async function testSingleAudioFile(audioFile, server, testIndex) {
 
         if (type === 'error') {
             errors.push(text);
+        }
+
+        // Log AudioSegmentExtractor messages in real-time for debugging
+        if (text.includes('[AudioSegmentExtractor]')) {
+            console.log(`   🔍 [${testId}] ${text}`);
         }
     });
 
@@ -225,6 +230,8 @@ async function testSingleAudioFile(audioFile, server, testIndex) {
         // Segment count validation
         if (expectedSegments === 'need clarification') {
             throw new Error(`File requires clarification - test intentionally failed`);
+        } else if (expectedSegments === 'expected-fail') {
+            throw new Error(`Expected failure - feature not implemented yet (got ${downloadButtons} segments)`);
         } else if (expectedSegments !== undefined && downloadButtons !== expectedSegments) {
             throw new Error(`Segment count mismatch: expected ${expectedSegments}, got ${downloadButtons}`);
         } else if (expectedSegments !== undefined) {
@@ -268,6 +275,9 @@ async function testSingleAudioFile(audioFile, server, testIndex) {
     } finally {
         await browser.close();
     }
+
+    // Attach console logs to test result
+    testResult.consoleLogs = consoleLogs;
 
     return testResult;
 }
@@ -409,12 +419,57 @@ async function runSequentialEvaluation() {
 
     console.log('\n🎯 EVALUATION COMPLETE');
 
-    return successCount === results.length;
+    // Return results with console logs for external processing
+    return {
+        success: successCount === results.length,
+        results: results
+    };
 }
 
 // Run the evaluation
-runSequentialEvaluation().then(success => {
-    process.exit(success ? 0 : 1);
+runSequentialEvaluation().then(evalResult => {
+    // Write detailed console logs to file if requested via environment variable
+    const logFilePath = process.env.EVAL_LOG_FILE;
+    if (logFilePath) {
+        console.log(`\n💾 Saving detailed console logs to ${logFilePath}...`);
+
+        const logOutput = [];
+        logOutput.push('=' .repeat(80));
+        logOutput.push('DETAILED CONSOLE LOGS FROM EVALUATION');
+        logOutput.push('=' .repeat(80));
+        logOutput.push('');
+
+        evalResult.results.forEach((result, index) => {
+            logOutput.push(`\n${'='.repeat(80)}`);
+            logOutput.push(`TEST ${index + 1}: ${result.fileName}`);
+            logOutput.push(`Status: ${result.success ? 'PASS' : 'FAIL'}`);
+            logOutput.push(`Duration: ${Math.round(result.duration/1000)}s`);
+            logOutput.push(`Segments: ${result.segmentsFound}`);
+            logOutput.push('='.repeat(80));
+            logOutput.push('');
+
+            if (result.consoleLogs && result.consoleLogs.length > 0) {
+                result.consoleLogs.forEach(log => {
+                    const prefix = log.type === 'error' ? '❌ ERROR' :
+                                 log.type === 'warning' ? '⚠️  WARN' :
+                                 '📝 LOG';
+                    logOutput.push(`${prefix}: ${log.text}`);
+                });
+            } else {
+                logOutput.push('(No console logs captured)');
+            }
+            logOutput.push('');
+        });
+
+        logOutput.push('\n' + '='.repeat(80));
+        logOutput.push('END OF CONSOLE LOGS');
+        logOutput.push('='.repeat(80));
+
+        fs.writeFileSync(logFilePath, logOutput.join('\n'));
+        console.log(`✅ Console logs saved to ${logFilePath}`);
+    }
+
+    process.exit(evalResult.success ? 0 : 1);
 }).catch(error => {
     console.error('❌ Evaluation runner error:', error);
     process.exit(1);

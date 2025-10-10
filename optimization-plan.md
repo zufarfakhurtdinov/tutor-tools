@@ -1,3 +1,9 @@
+# Offline Browser ASR Alternatives
+
+1. **PocketSphinx.js grammar recognizer** – bundle the WASM build with a JSGF grammar that only covers the spoken markers (numbers 1–12, colours). Word-level timestamps stay accurate for digits such as “three”, and the output drops straight into the existing pause-based segment logic.
+2. **Sherpa-ONNX WASM (Paraformer or keyword models)** – host the sherpa wasm runtime plus a paraformer-small or keyword-spotting model locally. It exposes token timestamps and Silero VAD, so the current segmentation/MP3 pipeline can run unchanged while gaining better numeral recall.
+3. **Dedicated keyword detectors (TFJS/ONNX)** – train or reuse a tiny digit/colour classifier (e.g. TensorFlow.js speech-commands) to double-check Whisper results. Run it on candidate windows and accept markers when classifier confidence and pause duration agree, recovering missed “three” phrases without downloading huge models.
+
 # Transformers.js Whisper Optimization Plan
 
 ## SUCCESS CRITERIA ⭐
